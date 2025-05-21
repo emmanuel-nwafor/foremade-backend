@@ -13,8 +13,8 @@ console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' :
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors({ origin: 'http://localhost:5173' }));
-// app.use(cors({ origin: 'https://foremade.co.uk' }));
+// app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(cors({ origin: process.env.DOMAIN }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
