@@ -9,11 +9,12 @@ const axios = require('axios');
 // Log env vars for debugging
 console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
+console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// app.use(cors({ origin: 'http://localhost:5173' }));
+// Configure CORS with the domain from env
 app.use(cors({ origin: process.env.DOMAIN }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
