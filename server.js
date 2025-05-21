@@ -15,7 +15,7 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Configure CORS with the domain from env
-app.use(cors({ origin: process.env.DOMAIN }));
+app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
