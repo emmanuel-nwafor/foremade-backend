@@ -1,3 +1,5 @@
+// This  is the server backup script -the previous version of the server script.
+
 require('dotenv').config();
 const express = require('express');
 const cloudinary = require('cloudinary').v2;
@@ -5,21 +7,6 @@ const cors = require('cors');
 const multer = require('multer');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-// Add Firestore imports for webhook
-const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
-
-// Firebase config (replace with your actual config)
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID,
-};
-const appFirebase = initializeApp(firebaseConfig);
-const db = getFirestore(appFirebase);
 
 // Log env vars for debugging
 console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
@@ -117,82 +104,6 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       error: 'Failed to initiate Paystack payment',
       details: error.message,
     });
-  }
-});
-
-// New endpoint for Stripe Checkout session (for deposits)
-app.post('/api/create-checkout-session', async (req, res) => {
-  try {
-    const { amount } = req.body;
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'ngn',
-            product_data: {
-              name: 'Wallet Deposit',
-            },
-            unit_amount: amount, // Amount in kobo (NGN cents)
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      success_url: `${process.env.DOMAIN}/wallet?success=true`,
-      cancel_url: `${process.env.DOMAIN}/wallet?cancelled=true`,
-    });
-
-    res.json({ id: session.id });
-  } catch (error) {
-    console.error('Checkout session error:', error);
-    res.status(500).json({ error: 'Failed to create checkout session', details: error.message });
-  }
-});
-
-// New webhook endpoint for Stripe events
-app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  try {
-    const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const amount = session.amount_total / 100; // Convert back to NGN
-      const userId = session.metadata.userId; // Assumes userId is passed in metadata
-
-      if (userId) {
-        const walletRef = doc(db, 'wallets', userId);
-        const walletSnap = await getDoc(walletRef);
-        const currentBalance = walletSnap.data()?.availableBalance || 0;
-
-        await updateDoc(walletRef, {
-          availableBalance: currentBalance + amount,
-          updatedAt: serverTimestamp(),
-        });
-
-        await addDoc(collection(db, 'transactions'), {
-          userId: userId,
-          type: 'Deposit',
-          description: 'Deposit via Stripe',
-          amount: amount,
-          date: new Date().toISOString().split('T')[0],
-          status: 'Completed',
-          createdAt: serverTimestamp(),
-        });
-      }
-    }
-
-    res.json({ received: true });
-  } catch (err) {
-    console.error('Webhook error:', err);
-    res.status(400).send(`Webhook Error: ${err.message}`);
   }
 });
 
