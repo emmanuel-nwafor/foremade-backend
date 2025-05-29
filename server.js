@@ -207,7 +207,6 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
         });
       }
     }
-
     res.json({ received: true });
   } catch (err) {
     console.error('Webhook error:', err);
