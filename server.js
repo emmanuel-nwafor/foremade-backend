@@ -27,7 +27,18 @@ console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' :
 console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'video/mp4'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only images (JPEG, JPG, PNG, WEBP, GIF) and videos (MP4) are allowed.'));
+    }
+  },
+});
 
 // Configure CORS with the domain from env
 app.use(cors());
@@ -40,14 +51,20 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-app.post('/upload', upload.single('image'), async (req, res) => {
+// Updated /upload endpoint to handle both images and videos
+app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No image file provided' });
+      return res.status(400).json({ error: 'No file provided' });
     }
+    const isVideo = req.body.isVideo === 'true';
+    const uploadOptions = {
+      folder: 'products',
+      resource_type: isVideo ? 'video' : 'image',
+    };
     const result = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
-        { folder: 'products' },
+        uploadOptions,
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
@@ -55,13 +72,14 @@ app.post('/upload', upload.single('image'), async (req, res) => {
       );
       stream.end(req.file.buffer);
     });
-    res.json({ imageUrl: result.secure_url, message: 'Image uploaded successfully' });
+    res.json({ url: result.secure_url, message: `${isVideo ? 'Video' : 'Image'} uploaded successfully` });
   } catch (error) {
     console.error('Upload error:', error);
-    res.status(500).json({ error: 'Failed to upload image', details: error.message });
+    res.status(500).json({ error: `Failed to upload ${req.body.isVideo === 'true' ? 'video' : 'image'}`, details: error.message });
   }
 });
 
+// Existing endpoint: Create Stripe payment intent
 app.post('/create-payment-intent', async (req, res) => {
   try {
     const { amount, currency = 'gbp', metadata } = req.body;
@@ -81,6 +99,7 @@ app.post('/create-payment-intent', async (req, res) => {
   }
 });
 
+// Existing endpoint: Initiate Paystack payment
 app.post('/initiate-paystack-payment', async (req, res) => {
   try {
     const { amount, email, currency = 'NGN', metadata } = req.body;
@@ -120,7 +139,7 @@ app.post('/initiate-paystack-payment', async (req, res) => {
   }
 });
 
-// New endpoint for Stripe Checkout session (for deposits)
+// Existing endpoint: Create Stripe checkout session for deposits
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     const { amount } = req.body;
@@ -154,7 +173,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// New webhook endpoint for Stripe events
+// Existing endpoint: Stripe webhook for events
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
