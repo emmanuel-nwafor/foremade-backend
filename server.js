@@ -40,8 +40,13 @@ const upload = multer({
   },
 });
 
-// Configure CORS with the domain from env
-app.use(cors());
+// Configure CORS to allow all origins for now
+app.use(cors({
+  origin: '*', // Allows all origins temporarily
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type'],
+}));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -51,17 +56,29 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // Updated /upload endpoint to handle both images and videos
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });
     }
+
     const isVideo = req.body.isVideo === 'true';
     const uploadOptions = {
       folder: 'products',
       resource_type: isVideo ? 'video' : 'image',
     };
+
+    // Validate file size and type (already handled by multer, but double-check)
+    if (req.file.size > 10 * 1024 * 1024) {
+      return res.status(400).json({ error: 'File size exceeds 10MB limit' });
+    }
+
     const result = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         uploadOptions,
@@ -72,10 +89,14 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       );
       stream.end(req.file.buffer);
     });
+
     res.json({ url: result.secure_url, message: `${isVideo ? 'Video' : 'Image'} uploaded successfully` });
   } catch (error) {
     console.error('Upload error:', error);
-    res.status(500).json({ error: `Failed to upload ${req.body.isVideo === 'true' ? 'video' : 'image'}`, details: error.message });
+    res.status(500).json({
+      error: `Failed to upload ${req.body.isVideo === 'true' ? 'video' : 'image'}`,
+      details: error.message,
+    });
   }
 });
 
