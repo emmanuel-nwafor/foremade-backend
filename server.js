@@ -5,7 +5,7 @@ const cors = require('cors');
 const multer = require('multer');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-// Add Firestore imports for webhook
+// Add Firestore imports for webhook 
 const { initializeApp } = require('firebase/app');
 const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
 
