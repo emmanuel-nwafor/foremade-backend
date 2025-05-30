@@ -5,11 +5,10 @@ const cors = require('cors');
 const multer = require('multer');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-// Add Firestore imports for webhook 
 const { initializeApp } = require('firebase/app');
 const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
 
-// Firebase config (replace with your actual config)
+// Firebase config
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY,
   authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -46,7 +45,6 @@ app.use(cors({
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type'],
 }));
-
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -61,7 +59,7 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
-// Updated /upload endpoint to handle both images and videos
+// /upload endpoint
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -74,7 +72,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       resource_type: isVideo ? 'video' : 'image',
     };
 
-    // Validate file size and type (already handled by multer, but double-check)
     if (req.file.size > 10 * 1024 * 1024) {
       return res.status(400).json({ error: 'File size exceeds 10MB limit' });
     }
@@ -100,19 +97,26 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// Existing endpoint: Create Stripe payment intent
+// Updated /create-payment-intent endpoint
 app.post('/create-payment-intent', async (req, res) => {
   try {
+    if (!req.body) {
+      return res.status(400).json({ error: 'Request body is missing' });
+    }
+
     const { amount, currency = 'gbp', metadata } = req.body;
+
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
+
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency,
       metadata,
       automatic_payment_methods: { enabled: true },
     });
+
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (error) {
     console.error('Payment intent error:', error);
@@ -120,13 +124,18 @@ app.post('/create-payment-intent', async (req, res) => {
   }
 });
 
-// Existing endpoint: Initiate Paystack payment
+// /initiate-paystack-payment endpoint
 app.post('/initiate-paystack-payment', async (req, res) => {
   try {
+    if (!req.body) {
+      return res.status(400).json({ error: 'Request body is missing' });
+    }
+
     const { amount, email, currency = 'NGN', metadata } = req.body;
     if (!amount || amount <= 0 || !email) {
       return res.status(400).json({ error: 'Invalid amount or email' });
     }
+
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
@@ -143,6 +152,7 @@ app.post('/initiate-paystack-payment', async (req, res) => {
         },
       }
     );
+
     if (response.data.status) {
       res.json({
         authorizationUrl: response.data.data.authorization_url,
@@ -160,9 +170,13 @@ app.post('/initiate-paystack-payment', async (req, res) => {
   }
 });
 
-// Existing endpoint: Create Stripe checkout session for deposits
+// /api/create-checkout-session endpoint
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
+    if (!req.body) {
+      return res.status(400).json({ error: 'Request body is missing' });
+    }
+
     const { amount } = req.body;
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
@@ -177,7 +191,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
             product_data: {
               name: 'Wallet Deposit',
             },
-            unit_amount: amount, // Amount in kobo (NGN cents)
+            unit_amount: amount,
           },
           quantity: 1,
         },
@@ -194,7 +208,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// Existing endpoint: Stripe webhook for events
+// /api/webhook endpoint
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -204,8 +218,8 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const amount = session.amount_total / 100; // Convert back to NGN
-      const userId = session.metadata.userId; // Assumes userId is passed in metadata
+      const amount = session.amount_total / 100;
+      const userId = session.metadata.userId;
 
       if (userId) {
         const walletRef = doc(db, 'wallets', userId);
