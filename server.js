@@ -6,7 +6,7 @@ const multer = require('multer');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 
 // Firebase config
 const firebaseConfig = {
@@ -97,7 +97,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// Updated /create-payment-intent endpoint
+// /create-payment-intent endpoint
 app.post('/create-payment-intent', async (req, res) => {
   try {
     if (!req.body) {
@@ -208,47 +208,200 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// /api/webhook endpoint
-app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
+// /onboard-seller endpoint (now called internally during payout)
+app.post('/onboard-seller', async (req, res) => {
   try {
-    const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const amount = session.amount_total / 100;
-      const userId = session.metadata.userId;
-
-      if (userId) {
-        const walletRef = doc(db, 'wallets', userId);
-        const walletSnap = await getDoc(walletRef);
-        const currentBalance = walletSnap.data()?.availableBalance || 0;
-
-        await updateDoc(walletRef, {
-          availableBalance: currentBalance + amount,
-          updatedAt: serverTimestamp(),
-        });
-
-        await addDoc(collection(db, 'transactions'), {
-          userId: userId,
-          type: 'Deposit',
-          description: 'Deposit via Stripe',
-          amount: amount,
-          date: new Date().toISOString().split('T')[0],
-          status: 'Completed',
-          createdAt: serverTimestamp(),
-        });
-      }
+    const { userId, bankCode, accountNumber, country, email } = req.body;
+    if (!userId || !country) {
+      return res.status(400).json({ error: 'Missing userId or country' });
     }
-    res.json({ received: true });
-  } catch (err) {
-    console.error('Webhook error:', err);
-    res.status(400).send(`Webhook Error: ${err.message}`);
+
+    if (country === 'Nigeria') {
+      if (!bankCode || !accountNumber) {
+        return res.status(400).json({ error: 'Missing bankCode or accountNumber for Nigeria' });
+      }
+
+      const recipientResponse = await axios.post(
+        'https://api.paystack.co/transferrecipient',
+        {
+          type: 'nuban',
+          name: `Seller ${userId}`,
+          account_number: accountNumber,
+          bank_code: bankCode,
+          currency: 'NGN',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!recipientResponse.data.status) {
+        throw new Error('Failed to create Paystack transfer recipient');
+      }
+
+      // Update Firestore with recipient code
+      const sellerRef = doc(db, 'sellers', userId);
+      await updateDoc(sellerRef, { paystackRecipientCode: recipientResponse.data.data.recipient_code, country });
+
+      res.json({
+        recipientCode: recipientResponse.data.data.recipient_code,
+      });
+    } else if (country === 'United Kingdom') {
+      const account = await stripe.accounts.create({
+        type: 'express',
+        country: 'GB',
+        email,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+      });
+
+      const accountLink = await stripe.accountLinks.create({
+        account: account.id,
+        refresh_url: `${process.env.DOMAIN}/seller-onboarding?status=failed`,
+        return_url: `${process.env.DOMAIN}/seller-onboarding?status=success`,
+        type: 'account_onboarding',
+      });
+
+      // Update Firestore with Stripe account ID
+      const sellerRef = doc(db, 'sellers', userId);
+      await updateDoc(sellerRef, { stripeAccountId: account.id, country });
+
+      res.json({
+        stripeAccountId: account.id,
+        redirectUrl: accountLink.url,
+      });
+    } else {
+      res.status(400).json({ error: 'Unsupported country' });
+    }
+  } catch (error) {
+    console.error('Onboarding error:', error);
+    res.status(500).json({ error: 'Failed to onboard seller', details: error.message });
   }
 });
 
+// /initiate-seller-payout endpoint
+app.post('/initiate-seller-payout', async (req, res) => {
+  try {
+    const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
+    if (!sellerId || !amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid sellerId or amount' });
+    }
+
+    // Fetch seller's details from Firestore
+    const sellerRef = doc(db, 'sellers', sellerId);
+    const sellerSnap = await getDoc(sellerRef);
+    if (!sellerSnap.exists()) {
+      return res.status(400).json({ error: 'Seller not found' });
+    }
+    const seller = sellerSnap.data();
+
+    // Onboard seller if not already done
+    if (!seller.paystackRecipientCode && country === 'Nigeria') {
+      const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
+        userId: sellerId,
+        bankCode,
+        accountNumber,
+        country,
+      });
+      if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
+    } else if (!seller.stripeAccountId && country === 'United Kingdom') {
+      const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
+        userId: sellerId,
+        country,
+        email,
+      });
+      if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
+    }
+
+    // Fetch updated seller data
+    const updatedSellerSnap = await getDoc(sellerRef);
+    const updatedSeller = updatedSellerSnap.data();
+    const updatedCountry = updatedSeller.country;
+
+    if (updatedCountry === 'Nigeria') {
+      const recipientCode = updatedSeller.paystackRecipientCode;
+      if (!recipientCode) {
+        return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
+      }
+
+      const transferResponse = await axios.post(
+        'https://api.paystack.co/transfer',
+        {
+          source: 'balance',
+          amount: Math.round(amount * 100), // Amount in kobo
+          recipient: recipientCode,
+          reason: `Payout for transaction ${transactionReference}`,
+          currency: 'NGN',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!transferResponse.data.status) {
+        throw new Error('Failed to initiate Paystack transfer');
+      }
+
+      await addDoc(collection(db, 'transactions'), {
+        userId: sellerId,
+        type: 'Payout',
+        description: `Payout for transaction ${transactionReference}`,
+        amount: amount,
+        date: new Date().toISOString().split('T')[0],
+        status: 'Pending',
+        createdAt: serverTimestamp(),
+        reference: transferResponse.data.data.reference,
+      });
+
+      res.json({
+        status: 'success',
+        reference: transferResponse.data.data.reference,
+      });
+    } else if (updatedCountry === 'United Kingdom') {
+      const stripeAccountId = updatedSeller.stripeAccountId;
+      if (!stripeAccountId) {
+        return res.status(400).json({ error: 'Seller has not completed Stripe onboarding' });
+      }
+
+      const transfer = await stripe.transfers.create({
+        amount: Math.round(amount * 100), // Amount in pence
+        currency: 'gbp',
+        destination: stripeAccountId,
+        description: `Payout for transaction ${transactionReference}`,
+      });
+
+      await addDoc(collection(db, 'transactions'), {
+        userId: sellerId,
+        type: 'Payout',
+        description: `Payout for transaction ${transactionReference}`,
+        amount: amount,
+        date: new Date().toISOString().split('T')[0],
+        status: 'Pending',
+        createdAt: serverTimestamp(),
+      });
+
+      res.json({
+        status: 'success',
+        transferId: transfer.id,
+      });
+    } else {
+      res.status(400).json({ error: 'Unsupported country' });
+    }
+  } catch (error) {
+    console.error('Payout error:', error);
+    res.status(500).json({ error: 'Failed to initiate seller payout', details: error.message });
+  }
+});
+
+// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
