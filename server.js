@@ -288,9 +288,85 @@ app.post('/onboard-seller', async (req, res) => {
 app.post('/initiate-seller-payout', async (req, res) => {
   try {
     const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
-    if (!sellerId || !amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid sellerId or amount' });
+    if (!sellerId || !amount || amount <= 0 || !transactionReference) {
+      return res.status(400).json({ error: 'Invalid sellerId, amount, or transactionReference' });
     }
+
+    // Fetch seller's wallet from Firestore
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    if (!walletSnap.exists()) {
+      return res.status(400).json({ error: 'Wallet not found' });
+    }
+    const wallet = walletSnap.data();
+
+    if (wallet.availableBalance < amount) {
+      return res.status(400).json({ error: 'Insufficient available balance' });
+    }
+
+    // Move amount from availableBalance to pendingBalance
+    await updateDoc(walletRef, {
+      availableBalance: wallet.availableBalance - amount,
+      pendingBalance: (wallet.pendingBalance || 0) + amount,
+      updatedAt: serverTimestamp(),
+    });
+
+    // Record the transaction as pending admin approval
+    const transactionDoc = await addDoc(collection(db, 'transactions'), {
+      userId: sellerId,
+      type: 'Withdrawal',
+      description: `Withdrawal request for transaction ${transactionReference} - Awaiting Admin Approval`,
+      amount: amount,
+      date: new Date().toISOString().split('T')[0],
+      status: 'Pending',
+      createdAt: serverTimestamp(),
+      reference: transactionReference,
+      bankCode: country === 'Nigeria' ? bankCode : undefined,
+      accountNumber: country === 'Nigeria' ? accountNumber : undefined,
+      country,
+      email,
+    });
+
+    res.json({
+      status: 'success',
+      transactionId: transactionDoc.id,
+      message: 'Withdrawal request submitted, awaiting admin approval',
+    });
+  } catch (error) {
+    console.error('Payout initiation error:', error);
+    res.status(500).json({ error: 'Failed to initiate seller payout', details: error.message });
+  }
+});
+
+// /approve-payout endpoint
+app.post('/approve-payout', async (req, res) => {
+  try {
+    const { transactionId, sellerId } = req.body;
+    if (!transactionId || !sellerId) {
+      return res.status(400).json({ error: 'Missing transactionId or sellerId' });
+    }
+
+    // Fetch transaction
+    const transactionRef = doc(db, 'transactions', transactionId);
+    const transactionSnap = await getDoc(transactionRef);
+    if (!transactionSnap.exists()) {
+      return res.status(400).json({ error: 'Transaction not found' });
+    }
+    const transaction = transactionSnap.data();
+
+    if (transaction.status !== 'Pending') {
+      return res.status(400).json({ error: 'Transaction is not in pending state' });
+    }
+
+    // Fetch seller's wallet
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    if (!walletSnap.exists()) {
+      return res.status(400).json({ error: 'Wallet not found' });
+    }
+    const wallet = walletSnap.data();
+
+    const amount = transaction.amount;
 
     // Fetch seller's details from Firestore
     const sellerRef = doc(db, 'sellers', sellerId);
@@ -301,11 +377,12 @@ app.post('/initiate-seller-payout', async (req, res) => {
     const seller = sellerSnap.data();
 
     // Onboard seller if not already done
+    const country = transaction.country;
     if (!seller.paystackRecipientCode && country === 'Nigeria') {
       const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
         userId: sellerId,
-        bankCode,
-        accountNumber,
+        bankCode: transaction.bankCode,
+        accountNumber: transaction.accountNumber,
         country,
       });
       if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
@@ -313,9 +390,13 @@ app.post('/initiate-seller-payout', async (req, res) => {
       const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
         userId: sellerId,
         country,
-        email,
+        email: transaction.email,
       });
       if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
+      return res.json({
+        status: 'redirect',
+        redirectUrl: onboardingResponse.data.redirectUrl,
+      });
     }
 
     // Fetch updated seller data
@@ -323,6 +404,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
     const updatedSeller = updatedSellerSnap.data();
     const updatedCountry = updatedSeller.country;
 
+    // Process the payout
     if (updatedCountry === 'Nigeria') {
       const recipientCode = updatedSeller.paystackRecipientCode;
       if (!recipientCode) {
@@ -335,7 +417,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
           source: 'balance',
           amount: Math.round(amount * 100), // Amount in kobo
           recipient: recipientCode,
-          reason: `Payout for transaction ${transactionReference}`,
+          reason: `Payout for transaction ${transaction.reference}`,
           currency: 'NGN',
         },
         {
@@ -350,15 +432,17 @@ app.post('/initiate-seller-payout', async (req, res) => {
         throw new Error('Failed to initiate Paystack transfer');
       }
 
-      await addDoc(collection(db, 'transactions'), {
-        userId: sellerId,
-        type: 'Payout',
-        description: `Payout for transaction ${transactionReference}`,
-        amount: amount,
-        date: new Date().toISOString().split('T')[0],
-        status: 'Pending',
-        createdAt: serverTimestamp(),
-        reference: transferResponse.data.data.reference,
+      // Update wallet: remove from pendingBalance (payout is processed)
+      await updateDoc(walletRef, {
+        pendingBalance: wallet.pendingBalance - amount,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Update transaction status
+      await updateDoc(transactionRef, {
+        status: 'Completed',
+        updatedAt: serverTimestamp(),
+        payoutReference: transferResponse.data.data.reference,
       });
 
       res.json({
@@ -375,17 +459,19 @@ app.post('/initiate-seller-payout', async (req, res) => {
         amount: Math.round(amount * 100), // Amount in pence
         currency: 'gbp',
         destination: stripeAccountId,
-        description: `Payout for transaction ${transactionReference}`,
+        description: `Payout for transaction ${transaction.reference}`,
       });
 
-      await addDoc(collection(db, 'transactions'), {
-        userId: sellerId,
-        type: 'Payout',
-        description: `Payout for transaction ${transactionReference}`,
-        amount: amount,
-        date: new Date().toISOString().split('T')[0],
-        status: 'Pending',
-        createdAt: serverTimestamp(),
+      // Update wallet: remove from pendingBalance (payout is processed)
+      await updateDoc(walletRef, {
+        pendingBalance: wallet.pendingBalance - amount,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Update transaction status
+      await updateDoc(transactionRef, {
+        status: 'Completed',
+        updatedAt: serverTimestamp(),
       });
 
       res.json({
@@ -396,8 +482,61 @@ app.post('/initiate-seller-payout', async (req, res) => {
       res.status(400).json({ error: 'Unsupported country' });
     }
   } catch (error) {
-    console.error('Payout error:', error);
-    res.status(500).json({ error: 'Failed to initiate seller payout', details: error.message });
+    console.error('Payout approval error:', error);
+    res.status(500).json({ error: 'Failed to approve payout', details: error.message });
+  }
+});
+
+// /reject-payout endpoint
+app.post('/reject-payout', async (req, res) => {
+  try {
+    const { transactionId, sellerId } = req.body;
+    if (!transactionId || !sellerId) {
+      return res.status(400).json({ error: 'Missing transactionId or sellerId' });
+    }
+
+    // Fetch transaction
+    const transactionRef = doc(db, 'transactions', transactionId);
+    const transactionSnap = await getDoc(transactionRef);
+    if (!transactionSnap.exists()) {
+      return res.status(400).json({ error: 'Transaction not found' });
+    }
+    const transaction = transactionSnap.data();
+
+    if (transaction.status !== 'Pending') {
+      return res.status(400).json({ error: 'Transaction is not in pending state' });
+    }
+
+    // Fetch seller's wallet
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    if (!walletSnap.exists()) {
+      return res.status(400).json({ error: 'Wallet not found' });
+    }
+    const wallet = walletSnap.data();
+
+    const amount = transaction.amount;
+
+    // Move amount back to availableBalance from pendingBalance
+    await updateDoc(walletRef, {
+      availableBalance: wallet.availableBalance + amount,
+      pendingBalance: wallet.pendingBalance - amount,
+      updatedAt: serverTimestamp(),
+    });
+
+    // Update transaction status to Rejected
+    await updateDoc(transactionRef, {
+      status: 'Rejected',
+      updatedAt: serverTimestamp(),
+    });
+
+    res.json({
+      status: 'success',
+      message: 'Payout rejected and funds returned to available balance',
+    });
+  } catch (error) {
+    console.error('Payout rejection error:', error);
+    res.status(500).json({ error: 'Failed to reject payout', details: error.message });
   }
 });
 
