@@ -401,7 +401,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
   }
 });
 
-// New endpoint to verify bank account
+// /verify-bank-account endpoint
 app.post('/verify-bank-account', async (req, res) => {
   try {
     const { accountNumber, bankCode } = req.body;
@@ -439,6 +439,31 @@ app.post('/verify-bank-account', async (req, res) => {
       error: 'Failed to verify bank account',
       details: error.response?.data?.message || error.message,
     });
+  }
+});
+
+// /fetch-banks endpoint
+app.get('/fetch-banks', async (req, res) => {
+  try {
+    console.log('Fetching banks with PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Key is set' : 'Key is NOT set');
+    const response = await axios.get('https://api.paystack.co/bank', {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log('Paystack Bank Fetch Response Status:', response.status);
+    console.log('Paystack Bank Fetch Data:', response.data);
+
+    if (response.data.status) {
+      res.json(response.data.data);
+    } else {
+      throw new Error('Failed to fetch banks');
+    }
+  } catch (error) {
+    console.error('Fetch banks error:', error);
+    res.status(500).json({ error: 'Failed to fetch banks', details: error.response?.data?.message || error.message });
   }
 });
 
