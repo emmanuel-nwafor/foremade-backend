@@ -147,20 +147,33 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     }
 
     const { amount, email, currency = 'NGN', metadata } = req.body;
-    if (!amount || amount <= 0 || !email) {
-      return res.status(400).json({ error: 'Invalid amount or email' });
+    console.log('Paystack Request Payload:', { amount, email, currency, metadata }); // Debug log
+
+    // Validate inputs
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+    if (!process.env.PAYSTACK_SECRET_KEY) {
+      return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
 
-    const adminFees = metadata.handlingFee + metadata.buyerProtectionFee;
+    const adminFees = metadata?.handlingFee + metadata?.buyerProtectionFee || 0; // Handle missing metadata
+    const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`; // Unique reference
 
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
-        amount: Math.round(amount),
+        amount: Math.round(amount), // Expecting amount in kobo
         email,
         currency,
-        reference: `ref-${Date.now()}`,
-        metadata,
+        reference,
+        metadata: {
+          ...metadata,
+          adminFees,
+        },
       },
       {
         headers: {
@@ -170,19 +183,18 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       }
     );
 
+    console.log('Paystack API Response:', response.data); // Debug log
     if (response.data.status) {
-      // Log manual transfer instructions for admin
       console.log(`Manual transfer required for admin fees: ${currency} ${adminFees} to Paystack recipient code ${ADMIN_PAYSTACK_RECIPIENT_CODE}`);
-
       res.json({
         authorizationUrl: response.data.data.authorization_url,
         reference: response.data.data.reference,
       });
     } else {
-      throw new Error('Failed to initialize Paystack transaction');
+      throw new Error(`Paystack error: ${response.data.message}`);
     }
   } catch (error) {
-    console.error('Paystack payment error:', error);
+    console.error('Paystack payment error:', error.response?.data || error.message);
     res.status(500).json({
       error: 'Failed to initiate Paystack payment',
       details: error.response?.data?.message || error.message,
