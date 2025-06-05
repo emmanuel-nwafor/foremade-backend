@@ -6,7 +6,7 @@ const multer = require('multer');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
 
 // Firebase config
 const firebaseConfig = {
@@ -41,7 +41,7 @@ const upload = multer({
 
 // Configure CORS to allow all origins for now
 app.use(cors({
-  origin: '*', // Allows all origins temporarily
+  origin: '*',
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type'],
 }));
@@ -53,6 +53,11 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+// Admin Stripe and Paystack account IDs (set these in your .env file)
+const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
+const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
+const ADMIN_ID = 'admin'; // Define your admin user ID
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -97,7 +102,32 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// /create-payment-intent endpoint
+// Update admin wallet
+const updateAdminWallet = async (amount, currency) => {
+  try {
+    const walletRef = doc(db, 'wallets', ADMIN_ID);
+    const walletSnap = await getDoc(walletRef);
+    if (walletSnap.exists()) {
+      await updateDoc(walletRef, {
+        availableBalance: (walletSnap.data().availableBalance || 0) + amount,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(walletRef, {
+        availableBalance: amount,
+        pendingBalance: 0,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+    }
+    console.log(`Admin wallet updated with ${currency} ${amount}`);
+  } catch (error) {
+    console.error('Error updating admin wallet:', error);
+    throw new Error('Failed to update admin wallet');
+  }
+};
+
+// /create-payment-intent endpoint (for UK - Stripe)
 app.post('/create-payment-intent', async (req, res) => {
   try {
     if (!req.body) {
@@ -110,12 +140,26 @@ app.post('/create-payment-intent', async (req, res) => {
       return res.status(400).json({ error: 'Invalid amount' });
     }
 
+    if (!ADMIN_STRIPE_ACCOUNT_ID) {
+      return res.status(500).json({ error: 'Admin Stripe account ID not configured' });
+    }
+
+    const totalAmountInCents = Math.round(amount * 100);
+    const adminShareInCents = Math.round(metadata.adminShare * 100);
+
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100),
+      amount: totalAmountInCents,
       currency,
       metadata,
+      application_fee_amount: adminShareInCents,
+      transfer_data: {
+        destination: ADMIN_STRIPE_ACCOUNT_ID,
+      },
       automatic_payment_methods: { enabled: true },
     });
+
+    // Update admin wallet (for record-keeping)
+    await updateAdminWallet(metadata.adminShare, currency);
 
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (error) {
@@ -124,7 +168,7 @@ app.post('/create-payment-intent', async (req, res) => {
   }
 });
 
-// /initiate-paystack-payment endpoint
+// /initiate-paystack-payment endpoint (for Nigeria - Paystack)
 app.post('/initiate-paystack-payment', async (req, res) => {
   try {
     if (!req.body) {
@@ -154,6 +198,12 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     );
 
     if (response.data.status) {
+      // Update admin wallet (for record-keeping)
+      await updateAdminWallet(metadata.adminShare, currency);
+
+      // Log manual transfer instructions for admin
+      console.log(`Manual transfer required for admin share: ${currency} ${metadata.adminShare} to Paystack recipient code ${ADMIN_PAYSTACK_RECIPIENT_CODE}`);
+
       res.json({
         authorizationUrl: response.data.data.authorization_url,
         reference: response.data.data.reference,
@@ -208,7 +258,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// /onboard-seller endpoint (now called internally during payout)
+// /onboard-seller endpoint
 app.post('/onboard-seller', async (req, res) => {
   try {
     const { userId, bankCode, accountNumber, country, email } = req.body;
