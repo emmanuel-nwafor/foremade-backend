@@ -120,6 +120,7 @@ app.post('/create-payment-intent', async (req, res) => {
 
     const totalAmountInCents = Math.round(amount);
     const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee) * (currency === 'gbp' ? 100 : 1));
+    const sellerId = metadata.sellerId;
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalAmountInCents,
@@ -131,6 +132,28 @@ app.post('/create-payment-intent', async (req, res) => {
       },
       automatic_payment_methods: { enabled: true },
     });
+
+    // Credit seller's pending balance
+    if (sellerId) {
+      const walletRef = doc(db, 'wallets', sellerId);
+      const walletSnap = await getDoc(walletRef);
+      const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
+      const netAmount = amount - (adminFeesInCents / 100);
+      await updateDoc(walletRef, {
+        pendingBalance: (walletData.pendingBalance || 0) + netAmount,
+        updatedAt: serverTimestamp(),
+      });
+      await addDoc(collection(db, 'transactions'), {
+        userId: sellerId,
+        type: 'Sale',
+        description: `Sale credited to pending balance for payment ${paymentIntent.id}`,
+        amount: netAmount,
+        date: new Date().toISOString().split('T')[0],
+        status: 'Pending',
+        createdAt: serverTimestamp(),
+        reference: paymentIntent.id,
+      });
+    }
 
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (error) {
@@ -147,9 +170,8 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     }
 
     const { amount, email, currency = 'NGN', metadata } = req.body;
-    console.log('Paystack Request Payload:', { amount, email, currency, metadata }); // Debug log
+    console.log('Paystack Request Payload:', { amount, email, currency, metadata });
 
-    // Validate inputs
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
@@ -160,20 +182,18 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
 
-    const adminFees = metadata?.handlingFee + metadata?.buyerProtectionFee || 0; // Handle missing metadata
-    const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`; // Unique reference
+    const adminFees = metadata?.handlingFee + metadata?.buyerProtectionFee || 0;
+    const sellerId = metadata.sellerId;
+    const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
-        amount: Math.round(amount), // Expecting amount in kobo
+        amount: Math.round(amount * 100),
         email,
         currency,
         reference,
-        metadata: {
-          ...metadata,
-          adminFees,
-        },
+        metadata: { ...metadata, adminFees },
       },
       {
         headers: {
@@ -183,9 +203,29 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       }
     );
 
-    console.log('Paystack API Response:', response.data); // Debug log
+    console.log('Paystack API Response:', response.data);
     if (response.data.status) {
       console.log(`Manual transfer required for admin fees: ${currency} ${adminFees} to Paystack recipient code ${ADMIN_PAYSTACK_RECIPIENT_CODE}`);
+      if (sellerId) {
+        const walletRef = doc(db, 'wallets', sellerId);
+        const walletSnap = await getDoc(walletRef);
+        const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
+        const netAmount = (amount - adminFees) / 100; // Convert from kobo to NGN
+        await updateDoc(walletRef, {
+          pendingBalance: (walletData.pendingBalance || 0) + netAmount,
+          updatedAt: serverTimestamp(),
+        });
+        await addDoc(collection(db, 'transactions'), {
+          userId: sellerId,
+          type: 'Sale',
+          description: `Sale credited to pending balance for payment ${reference}`,
+          amount: netAmount,
+          date: new Date().toISOString().split('T')[0],
+          status: 'Pending',
+          createdAt: serverTimestamp(),
+          reference: reference,
+        });
+      }
       res.json({
         authorizationUrl: response.data.data.authorization_url,
         reference: response.data.data.reference,
@@ -274,7 +314,6 @@ app.post('/onboard-seller', async (req, res) => {
         throw new Error('Failed to create Paystack transfer recipient');
       }
 
-      // Update Firestore with recipient code
       const sellerRef = doc(db, 'sellers', userId);
       await updateDoc(sellerRef, { paystackRecipientCode: recipientResponse.data.data.recipient_code, country });
 
@@ -299,7 +338,6 @@ app.post('/onboard-seller', async (req, res) => {
         type: 'account_onboarding',
       });
 
-      // Update Firestore with Stripe account ID
       const sellerRef = doc(db, 'sellers', userId);
       await updateDoc(sellerRef, { stripeAccountId: account.id, country });
 
@@ -324,7 +362,6 @@ app.post('/initiate-seller-payout', async (req, res) => {
       return res.status(400).json({ error: 'Invalid sellerId, amount, or transactionReference' });
     }
 
-    // Fetch seller's wallet from Firestore
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
@@ -336,14 +373,12 @@ app.post('/initiate-seller-payout', async (req, res) => {
       return res.status(400).json({ error: 'Insufficient available balance' });
     }
 
-    // Move amount from availableBalance to pendingBalance
     await updateDoc(walletRef, {
       availableBalance: wallet.availableBalance - amount,
       pendingBalance: (wallet.pendingBalance || 0) + amount,
       updatedAt: serverTimestamp(),
     });
 
-    // Record the transaction as pending admin approval
     const transactionDoc = await addDoc(collection(db, 'transactions'), {
       userId: sellerId,
       type: 'Withdrawal',
@@ -378,7 +413,6 @@ app.post('/approve-payout', async (req, res) => {
       return res.status(400).json({ error: 'Missing transactionId or sellerId' });
     }
 
-    // Fetch transaction
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
     if (!transactionSnap.exists()) {
@@ -390,7 +424,6 @@ app.post('/approve-payout', async (req, res) => {
       return res.status(400).json({ error: 'Transaction is not in pending state' });
     }
 
-    // Fetch seller's wallet
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
@@ -400,7 +433,6 @@ app.post('/approve-payout', async (req, res) => {
 
     const amount = transaction.amount;
 
-    // Fetch seller's details from Firestore
     const sellerRef = doc(db, 'sellers', sellerId);
     const sellerSnap = await getDoc(sellerRef);
     if (!sellerSnap.exists()) {
@@ -408,7 +440,6 @@ app.post('/approve-payout', async (req, res) => {
     }
     const seller = sellerSnap.data();
 
-    // Onboard seller if not already done
     const country = transaction.country;
     if (!seller.paystackRecipientCode && country === 'Nigeria') {
       const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
@@ -431,12 +462,10 @@ app.post('/approve-payout', async (req, res) => {
       });
     }
 
-    // Fetch updated seller data
     const updatedSellerSnap = await getDoc(sellerRef);
     const updatedSeller = updatedSellerSnap.data();
     const updatedCountry = updatedSeller.country;
 
-    // Process the payout
     if (updatedCountry === 'Nigeria') {
       const recipientCode = updatedSeller.paystackRecipientCode;
       if (!recipientCode) {
@@ -447,7 +476,7 @@ app.post('/approve-payout', async (req, res) => {
         'https://api.paystack.co/transfer',
         {
           source: 'balance',
-          amount: Math.round(amount * 100), // Amount in kobo
+          amount: Math.round(amount * 100),
           recipient: recipientCode,
           reason: `Payout for transaction ${transaction.reference}`,
           currency: 'NGN',
@@ -464,13 +493,12 @@ app.post('/approve-payout', async (req, res) => {
         throw new Error('Failed to initiate Paystack transfer');
       }
 
-      // Update wallet: remove from pendingBalance (payout is processed)
       await updateDoc(walletRef, {
+        availableBalance: (wallet.availableBalance || 0) + amount,
         pendingBalance: wallet.pendingBalance - amount,
         updatedAt: serverTimestamp(),
       });
 
-      // Update transaction status
       await updateDoc(transactionRef, {
         status: 'Completed',
         updatedAt: serverTimestamp(),
@@ -488,19 +516,18 @@ app.post('/approve-payout', async (req, res) => {
       }
 
       const transfer = await stripe.transfers.create({
-        amount: Math.round(amount * 100), // Amount in pence
+        amount: Math.round(amount * 100),
         currency: 'gbp',
         destination: stripeAccountId,
         description: `Payout for transaction ${transaction.reference}`,
       });
 
-      // Update wallet: remove from pendingBalance (payout is processed)
       await updateDoc(walletRef, {
+        availableBalance: (wallet.availableBalance || 0) + amount,
         pendingBalance: wallet.pendingBalance - amount,
         updatedAt: serverTimestamp(),
       });
 
-      // Update transaction status
       await updateDoc(transactionRef, {
         status: 'Completed',
         updatedAt: serverTimestamp(),
@@ -527,7 +554,6 @@ app.post('/reject-payout', async (req, res) => {
       return res.status(400).json({ error: 'Missing transactionId or sellerId' });
     }
 
-    // Fetch transaction
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
     if (!transactionSnap.exists()) {
@@ -539,7 +565,6 @@ app.post('/reject-payout', async (req, res) => {
       return res.status(400).json({ error: 'Transaction is not in pending state' });
     }
 
-    // Fetch seller's wallet
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
@@ -549,14 +574,12 @@ app.post('/reject-payout', async (req, res) => {
 
     const amount = transaction.amount;
 
-    // Move amount back to availableBalance from pendingBalance
     await updateDoc(walletRef, {
       availableBalance: wallet.availableBalance + amount,
       pendingBalance: wallet.pendingBalance - amount,
       updatedAt: serverTimestamp(),
     });
 
-    // Update transaction status to Rejected
     await updateDoc(transactionRef, {
       status: 'Rejected',
       updatedAt: serverTimestamp(),
