@@ -57,7 +57,6 @@ cloudinary.config({
 // Admin Stripe and Paystack account IDs (set these in your .env file)
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
-const ADMIN_ID = 'admin'; // Define your admin user ID
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -102,31 +101,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// Update admin wallet
-const updateAdminWallet = async (amount, currency) => {
-  try {
-    const walletRef = doc(db, 'wallets', ADMIN_ID);
-    const walletSnap = await getDoc(walletRef);
-    if (walletSnap.exists()) {
-      await updateDoc(walletRef, {
-        availableBalance: (walletSnap.data().availableBalance || 0) + amount,
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await setDoc(walletRef, {
-        availableBalance: amount,
-        pendingBalance: 0,
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
-    }
-    console.log(`Admin wallet updated with ${currency} ${amount}`);
-  } catch (error) {
-    console.error('Error updating admin wallet:', error);
-    throw new Error('Failed to update admin wallet');
-  }
-};
-
 // /create-payment-intent endpoint (for UK - Stripe)
 app.post('/create-payment-intent', async (req, res) => {
   try {
@@ -144,22 +118,19 @@ app.post('/create-payment-intent', async (req, res) => {
       return res.status(500).json({ error: 'Admin Stripe account ID not configured' });
     }
 
-    const totalAmountInCents = Math.round(amount * 100);
-    const adminShareInCents = Math.round(metadata.adminShare * 100);
+    const totalAmountInCents = Math.round(amount);
+    const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee) * (currency === 'gbp' ? 100 : 1));
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalAmountInCents,
       currency,
       metadata,
-      application_fee_amount: adminShareInCents,
+      application_fee_amount: adminFeesInCents,
       transfer_data: {
         destination: ADMIN_STRIPE_ACCOUNT_ID,
       },
       automatic_payment_methods: { enabled: true },
     });
-
-    // Update admin wallet (for record-keeping)
-    await updateAdminWallet(metadata.adminShare, currency);
 
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (error) {
@@ -180,10 +151,12 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       return res.status(400).json({ error: 'Invalid amount or email' });
     }
 
+    const adminFees = metadata.handlingFee + metadata.buyerProtectionFee;
+
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
-        amount: Math.round(amount * 100),
+        amount: Math.round(amount),
         email,
         currency,
         reference: `ref-${Date.now()}`,
@@ -198,11 +171,8 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     );
 
     if (response.data.status) {
-      // Update admin wallet (for record-keeping)
-      await updateAdminWallet(metadata.adminShare, currency);
-
       // Log manual transfer instructions for admin
-      console.log(`Manual transfer required for admin share: ${currency} ${metadata.adminShare} to Paystack recipient code ${ADMIN_PAYSTACK_RECIPIENT_CODE}`);
+      console.log(`Manual transfer required for admin fees: ${currency} ${adminFees} to Paystack recipient code ${ADMIN_PAYSTACK_RECIPIENT_CODE}`);
 
       res.json({
         authorizationUrl: response.data.data.authorization_url,
