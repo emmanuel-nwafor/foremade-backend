@@ -172,6 +172,7 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     const { amount, email, currency = 'NGN', metadata } = req.body;
     console.log('Paystack Request Payload:', { amount, email, currency, metadata });
 
+    // Validate inputs
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
@@ -183,17 +184,21 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     }
 
     const adminFees = metadata?.handlingFee + metadata?.buyerProtectionFee || 0;
-    const sellerId = metadata.sellerId;
+    const sellerId = metadata?.sellerId; // Ensure sellerId is optional but handled
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+
+    // Convert amount to kobo (Paystack expects amount in kobo)
+    const amountInKobo = Math.round(amount * 100);
 
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
-        amount: Math.round(amount * 100),
+        amount: amountInKobo, // Amount in kobo
         email,
         currency,
         reference,
         metadata: { ...metadata, adminFees },
+        channels: ['card', 'bank', 'qr', 'mobile_money', 'bank_transfer'], // Specify supported channels
       },
       {
         headers: {
@@ -210,7 +215,7 @@ app.post('/initiate-paystack-payment', async (req, res) => {
         const walletRef = doc(db, 'wallets', sellerId);
         const walletSnap = await getDoc(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
-        const netAmount = (amount - adminFees) / 100; // Convert from kobo to NGN
+        const netAmount = (amount - adminFees) / 100; // Convert back to NGN for wallet
         await updateDoc(walletRef, {
           pendingBalance: (walletData.pendingBalance || 0) + netAmount,
           updatedAt: serverTimestamp(),
@@ -231,7 +236,7 @@ app.post('/initiate-paystack-payment', async (req, res) => {
         reference: response.data.data.reference,
       });
     } else {
-      throw new Error(`Paystack error: ${response.data.message}`);
+      throw new Error(`Paystack error: ${response.data.message || 'Unknown error'}`);
     }
   } catch (error) {
     console.error('Paystack payment error:', error.response?.data || error.message);
