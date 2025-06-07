@@ -54,7 +54,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Admin Stripe and Paystack account IDs (set these in your .env file)
+// Admin Stripe and Paystack account IDs
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
 
@@ -173,32 +173,35 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     console.log('Paystack Request Payload:', { amount, email, currency, metadata });
 
     // Validate inputs
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
+    if (!amount || amount <= 0 || !Number.isFinite(amount)) {
+      return res.status(400).json({ error: 'Invalid or missing amount' });
     }
     if (!email || !/\S+@\S+\.\S+/.test(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
+      return res.status(400).json({ error: 'Invalid or missing email' });
+    }
+    if (!metadata || !metadata.sellerId) {
+      return res.status(400).json({ error: 'Missing sellerId in metadata' });
     }
     if (!process.env.PAYSTACK_SECRET_KEY) {
       return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
 
-    const adminFees = metadata?.handlingFee + metadata?.buyerProtectionFee || 0;
-    const sellerId = metadata?.sellerId; // Ensure sellerId is optional but handled
+    const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0);
+    const sellerId = metadata.sellerId;
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-
-    // Convert amount to kobo (Paystack expects amount in kobo)
-    const amountInKobo = Math.round(amount * 100);
+    const amountInKobo = Math.round(amount * 100); // Convert to kobo
+    const callbackUrl = `${process.env.DOMAIN}/checkout?paystack_callback=true`;
 
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
-        amount: amountInKobo, // Amount in kobo
+        amount: amountInKobo,
         email,
         currency,
         reference,
+        callback_url: callbackUrl,
         metadata: { ...metadata, adminFees },
-        channels: ['card', 'bank', 'qr', 'mobile_money', 'bank_transfer'], // Specify supported channels
+        channels: ['card', 'bank', 'qr', 'mobile_money', 'bank_transfer'],
       },
       {
         headers: {
@@ -210,27 +213,26 @@ app.post('/initiate-paystack-payment', async (req, res) => {
 
     console.log('Paystack API Response:', response.data);
     if (response.data.status) {
-      console.log(`Manual transfer required for admin fees: ${currency} ${adminFees} to Paystack recipient code ${ADMIN_PAYSTACK_RECIPIENT_CODE}`);
-      if (sellerId) {
-        const walletRef = doc(db, 'wallets', sellerId);
-        const walletSnap = await getDoc(walletRef);
-        const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
-        const netAmount = (amount - adminFees) / 100; // Convert back to NGN for wallet
-        await updateDoc(walletRef, {
-          pendingBalance: (walletData.pendingBalance || 0) + netAmount,
-          updatedAt: serverTimestamp(),
-        });
-        await addDoc(collection(db, 'transactions'), {
-          userId: sellerId,
-          type: 'Sale',
-          description: `Sale credited to pending balance for payment ${reference}`,
-          amount: netAmount,
-          date: new Date().toISOString().split('T')[0],
-          status: 'Pending',
-          createdAt: serverTimestamp(),
-          reference: reference,
-        });
-      }
+      // Only credit seller's pending balance after successful Paystack initialization
+      const walletRef = doc(db, 'wallets', sellerId);
+      const walletSnap = await getDoc(walletRef);
+      const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
+      const netAmount = amount - adminFees; // Amount in NGN
+      await updateDoc(walletRef, {
+        pendingBalance: (walletData.pendingBalance || 0) + netAmount,
+        updatedAt: serverTimestamp(),
+      });
+      await addDoc(collection(db, 'transactions'), {
+        userId: sellerId,
+        type: 'Sale',
+        description: `Sale credited to pending balance for payment ${reference}`,
+        amount: netAmount,
+        date: new Date().toISOString().split('T')[0],
+        status: 'Pending',
+        createdAt: serverTimestamp(),
+        reference,
+      });
+
       res.json({
         authorizationUrl: response.data.data.authorization_url,
         reference: response.data.data.reference,
@@ -242,6 +244,64 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     console.error('Paystack payment error:', error.response?.data || error.message);
     res.status(500).json({
       error: 'Failed to initiate Paystack payment',
+      details: error.response?.data?.message || error.message,
+    });
+  }
+});
+
+// /verify-paystack-payment endpoint
+app.post('/verify-paystack-payment', async (req, res) => {
+  try {
+    const { reference, sellerId } = req.body;
+    if (!reference || !sellerId) {
+      return res.status(400).json({ error: 'Missing reference or sellerId' });
+    }
+
+    const response = await axios.get(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    console.log('Paystack Verification Response:', response.data);
+    if (response.data.status && response.data.data.status === 'success') {
+      const walletRef = doc(db, 'wallets', sellerId);
+      const walletSnap = await getDoc(walletRef);
+      const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
+      const amount = response.data.data.amount / 100; // Convert kobo to NGN
+      const adminFees = response.data.data.metadata?.adminFees || 0;
+      const netAmount = amount - adminFees;
+
+      // Move from pending to available balance upon verification
+      await updateDoc(walletRef, {
+        pendingBalance: (walletData.pendingBalance || 0) - netAmount,
+        availableBalance: (walletData.availableBalance || 0) + netAmount,
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, 'transactions'), {
+        userId: sellerId,
+        type: 'Sale',
+        description: `Payment verified for reference ${reference}`,
+        amount: netAmount,
+        date: new Date().toISOString().split('T')[0],
+        status: 'Completed',
+        createdAt: serverTimestamp(),
+        reference,
+      });
+
+      res.json({ status: 'success', message: 'Payment verified successfully' });
+    } else {
+      throw new Error(`Paystack verification failed: ${response.data.message || 'Unknown error'}`);
+    }
+  } catch (error) {
+    console.error('Paystack verification error:', error.response?.data || error.message);
+    res.status(500).json({
+      error: 'Failed to verify Paystack payment',
       details: error.response?.data?.message || error.message,
     });
   }
