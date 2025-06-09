@@ -157,18 +157,21 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     if (!email || !/\S+@\S+\.\S+/.test(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
+    if (!metadata?.sellerId) {
+      return res.status(400).json({ error: 'Seller ID is required in metadata' });
+    }
     if (!process.env.PAYSTACK_SECRET_KEY) {
       return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
 
-    const adminFees = metadata?.handlingFee + metadata?.buyerProtectionFee || 0;
-    const sellerId = metadata?.sellerId;
+    const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0);
+    const sellerId = metadata.sellerId;
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
-    // Convert amount to kobo and validate
-    const amountInKobo = Math.round(amount * 100);
+    // Use amount directly (already in kobo)
+    const amountInKobo = Math.round(amount);
     if (isNaN(amountInKobo) || amountInKobo <= 0) {
-      return res.status(400).json({ error: 'Invalid amount conversion to kobo' });
+      return res.status(400).json({ error: 'Invalid amount' });
     }
 
     const payload = {
@@ -177,8 +180,8 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       currency,
       reference,
       metadata: { ...metadata, adminFees },
-      channels: ['card', 'bank'], // Simplified to common channels
-      callback_url: `${process.env.DOMAIN}/payment-callback`, // Notify your app
+      channels: ['card', 'bank'],
+      callback_url: `${process.env.DOMAIN}/payment-callback`,
     };
 
     console.log('Paystack Payload Sent:', payload);
@@ -197,15 +200,11 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     console.log('Paystack API Response:', response.data);
 
     if (response.data.status) {
-      if (!sellerId) {
-        return res.status(400).json({ error: 'Seller ID is required in metadata' });
-      }
-
-      // Credit seller's pending balance after successful initialization
+      // Credit seller's pending balance
       const walletRef = doc(db, 'wallets', sellerId);
       const walletSnap = await getDoc(walletRef);
       const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
-      const netAmount = (amount - adminFees) / 100; // Convert back to NGN
+      const netAmount = (amount - adminFees) / 100; // Convert kobo to NGN for wallet
       await updateDoc(walletRef, {
         pendingBalance: (walletData.pendingBalance || 0) + netAmount,
         updatedAt: serverTimestamp(),
@@ -230,13 +229,12 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     }
   } catch (error) {
     console.error('Paystack payment error:', error.response?.data || error.message);
-    res.status(500).json({
+    res.status(error.response?.status || 500).json({
       error: 'Failed to initiate Paystack payment',
       details: error.response?.data?.message || error.message,
     });
   }
 });
-
 // /api/create-checkout-session endpoint
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
