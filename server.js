@@ -6,7 +6,8 @@ const multer = require('multer');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
+const crypto = require('crypto');
 
 // Firebase config
 const firebaseConfig = {
@@ -140,6 +141,116 @@ app.post('/create-payment-intent', async (req, res) => {
   }
 });
 
+// /paystack-webhook endpoint
+app.post('/paystack-webhook', async (req, res) => {
+  try {
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const hash = crypto.createHmac('sha512', secret)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+    if (hash !== req.headers['x-paystack-signature']) {
+      console.error('Invalid Paystack webhook signature');
+      return res.status(400).json({ error: 'Invalid signature' });
+    }
+
+    const event = req.body;
+    console.log('Paystack webhook event:', event);
+
+    if (event.event === 'charge.success') {
+      const { reference, amount, metadata } = event.data;
+      const amountInKobo = amount; // Paystack sends amount in kobo
+      const sellerId = metadata.sellerId;
+      const adminFees = metadata.adminFees || 0;
+
+      const q = query(
+        collection(db, 'transactions'),
+        where('reference', '==', reference),
+        where('status', '==', 'Initiated')
+      );
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) {
+        console.warn(`No Initiated transaction found for reference ${reference}`);
+        return res.status(200).json({ status: 'success' }); // Idempotency: skip if already processed
+      }
+
+      const transactionDoc = querySnapshot.docs[0];
+      const transactionRef = doc(db, 'transactions', transactionDoc.id);
+      const netAmount = (amountInKobo - adminFees) / 100; // Convert to NGN
+
+      const walletRef = doc(db, 'wallets', sellerId);
+      const walletSnap = await getDoc(walletRef);
+      const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
+
+      await updateDoc(walletRef, {
+        pendingBalance: (walletData.pendingBalance || 0) + netAmount,
+        updatedAt: serverTimestamp(),
+      });
+
+      await updateDoc(transactionRef, {
+        status: 'Completed',
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, 'transactions'), {
+        userId: sellerId,
+        type: 'Sale',
+        description: `Sale credited to pending balance for payment ${reference}`,
+        amount: netAmount,
+        date: new Date().toISOString().split('T')[0],
+        status: 'Completed',
+        createdAt: serverTimestamp(),
+        reference,
+      });
+
+      console.log(`Processed charge.success for reference ${reference}: credited ${netAmount} to seller ${sellerId}`);
+    }
+
+    res.status(200).json({ status: 'success' });
+  } catch (error) {
+    console.error('Paystack webhook error:', error);
+    res.status(500).json({ error: 'Failed to process webhook', details: error.message });
+  }
+});
+
+// /verify-paystack-payment endpoint
+app.post('/verify-paystack-payment', async (req, res) => {
+  try {
+    const { reference } = req.body;
+    if (!reference) {
+      return res.status(400).json({ error: 'Missing reference' });
+    }
+
+    const response = await axios.get(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (!response.data.status || response.data.data.status !== 'success') {
+      return res.status(400).json({ error: 'Payment not successful', details: response.data.message });
+    }
+
+    const q = query(
+      collection(db, 'transactions'),
+      where('reference', '==', reference),
+      where('status', '==', 'Completed')
+    );
+    const querySnapshot = await getDocs(q);
+    if (querySnapshot.empty) {
+      return res.status(400).json({ error: 'Payment not confirmed in system' });
+    }
+
+    res.json({ status: 'success', data: response.data.data });
+  } catch (error) {
+    console.error('Paystack verification error:', error);
+    res.status(500).json({ error: 'Failed to verify payment', details: error.response?.data?.message || error.message });
+  }
+});
+
 // /initiate-paystack-payment endpoint (for Nigeria - Paystack)
 app.post('/initiate-paystack-payment', async (req, res) => {
   try {
@@ -200,24 +311,17 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     console.log('Paystack API Response:', response.data);
 
     if (response.data.status) {
-      // Credit seller's pending balance
-      const walletRef = doc(db, 'wallets', sellerId);
-      const walletSnap = await getDoc(walletRef);
-      const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
-      const netAmount = (amount - adminFees) / 100; // Convert kobo to NGN for wallet
-      await updateDoc(walletRef, {
-        pendingBalance: (walletData.pendingBalance || 0) + netAmount,
-        updatedAt: serverTimestamp(),
-      });
+      // Store transaction as Initiated
       await addDoc(collection(db, 'transactions'), {
         userId: sellerId,
         type: 'Sale',
-        description: `Sale credited to pending balance for payment ${reference}`,
-        amount: netAmount,
+        description: `Sale initiated for payment ${reference}`,
+        amount: amountInKobo / 100, // Store in NGN
+        adminFees: adminFees / 100, // Store in NGN
         date: new Date().toISOString().split('T')[0],
-        status: 'Pending',
+        status: 'Initiated',
         createdAt: serverTimestamp(),
-        reference: reference,
+        reference,
       });
 
       res.json({
@@ -235,6 +339,7 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     });
   }
 });
+
 // /api/create-checkout-session endpoint
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
