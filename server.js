@@ -759,6 +759,37 @@ app.get('/fetch-banks', async (req, res) => {
   }
 });
 
+// Add this new endpoint just before app.listen
+app.post('/verify-recaptcha', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, error: 'No reCAPTCHA token provided' });
+    }
+
+    const response = await axios.post(
+      `https://www.google.com/recaptcha/api/siteverify`,
+      null,
+      {
+        params: {
+          secret: process.env.RECAPTCHA_SECRET_KEY,
+          response: token,
+        },
+      }
+    );
+
+    const data = response.data;
+    if (data.success) {
+      return res.json({ success: true, score: data.score });
+    } else {
+      return res.json({ success: false, error: 'reCAPTCHA verification failed', details: data['error-codes'] });
+    }
+  } catch (error) {
+    console.error('reCAPTCHA verification error:', error);
+    res.status(500).json({ success: false, error: 'Failed to verify reCAPTCHA', details: error.message });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
