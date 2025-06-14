@@ -759,34 +759,44 @@ app.get('/fetch-banks', async (req, res) => {
   }
 });
 
-// Add this new endpoint just before app.listen
+// Replace or add this endpoint just before app.listen
 app.post('/verify-recaptcha', async (req, res) => {
+  console.log('Received reCAPTCHA verification request:', req.body);
   try {
     const { token } = req.body;
     if (!token) {
+      console.error('No reCAPTCHA token provided');
       return res.status(400).json({ success: false, error: 'No reCAPTCHA token provided' });
     }
 
+    if (!process.env.RECAPTCHA_SECRET_KEY) {
+      console.error('RECAPTCHA_SECRET_KEY is missing');
+      return res.status(500).json({ success: false, error: 'Server configuration error' });
+    }
+
     const response = await axios.post(
-      `https://www.google.com/recaptcha/api/siteverify`,
-      null,
+      'https://www.google.com/recaptcha/api/siteverify',
+      new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET_KEY,
+        response: token,
+      }),
       {
-        params: {
-          secret: process.env.RECAPTCHA_SECRET_KEY,
-          response: token,
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       }
     );
 
+    console.log('Google reCAPTCHA API response:', response.data);
     const data = response.data;
+
     if (data.success) {
       return res.json({ success: true, score: data.score });
     } else {
-      return res.json({ success: false, error: 'reCAPTCHA verification failed', details: data['error-codes'] });
+      console.error('reCAPTCHA verification failed:', data['error-codes']);
+      return res.status(400).json({ success: false, error: 'reCAPTCHA verification failed', details: data['error-codes'] });
     }
   } catch (error) {
-    console.error('reCAPTCHA verification error:', error);
-    res.status(500).json({ success: false, error: 'Failed to verify reCAPTCHA', details: error.message });
+    console.error('reCAPTCHA verification error:', error.message, error.response?.data);
+    return res.status(500).json({ success: false, error: 'Failed to verify reCAPTCHA', details: error.message });
   }
 });
 
