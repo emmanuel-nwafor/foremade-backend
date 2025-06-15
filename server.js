@@ -474,7 +474,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
     const wallet = walletSnap.data();
 
     if (wallet.availableBalance < amount) {
-      return res.status(400').json({ error: 'Insufficient available balance' });
+      return res.status(400).json({ error: 'Insufficient available balance' });
     }
 
     await updateDoc(walletRef, {
