@@ -8,6 +8,7 @@ const axios = require('axios');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 // Firebase config
 const firebaseConfig = {
@@ -55,13 +56,22 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Admin Stripe and Paystack account IDs (set these in your .env file)
+// Admin Stripe and Paystack account IDs
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
 
+// Nodemailer transporter
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).send('OK');
+  res.status(200).json({ status: 'OK' });
 });
 
 // /upload endpoint
@@ -158,7 +168,7 @@ app.post('/paystack-webhook', async (req, res) => {
 
     if (event.event === 'charge.success') {
       const { reference, amount, metadata } = event.data;
-      const amountInKobo = amount; // Paystack sends amount in kobo
+      const amountInKobo = amount;
       const sellerId = metadata.sellerId;
       const adminFees = metadata.adminFees || 0;
 
@@ -170,12 +180,12 @@ app.post('/paystack-webhook', async (req, res) => {
       const querySnapshot = await getDocs(q);
       if (querySnapshot.empty) {
         console.warn(`No Initiated transaction found for reference ${reference}`);
-        return res.status(200).json({ status: 'success' }); // Idempotency: skip if already processed
+        return res.status(200).json({ status: 'success' });
       }
 
       const transactionDoc = querySnapshot.docs[0];
       const transactionRef = doc(db, 'transactions', transactionDoc.id);
-      const netAmount = (amountInKobo - adminFees) / 100; // Convert to NGN
+      const netAmount = (amountInKobo - adminFees) / 100;
 
       const walletRef = doc(db, 'wallets', sellerId);
       const walletSnap = await getDoc(walletRef);
@@ -261,7 +271,6 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     const { amount, email, currency = 'NGN', metadata } = req.body;
     console.log('Paystack Request Payload:', { amount, email, currency, metadata });
 
-    // Validate inputs
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
@@ -279,7 +288,6 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     const sellerId = metadata.sellerId;
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
-    // Use amount directly (already in kobo)
     const amountInKobo = Math.round(amount);
     if (isNaN(amountInKobo) || amountInKobo <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
@@ -311,13 +319,12 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     console.log('Paystack API Response:', response.data);
 
     if (response.data.status) {
-      // Store transaction as Initiated
       await addDoc(collection(db, 'transactions'), {
         userId: sellerId,
         type: 'Sale',
         description: `Sale initiated for payment ${reference}`,
-        amount: amountInKobo / 100, // Store in NGN
-        adminFees: adminFees / 100, // Store in NGN
+        amount: amountInKobo / 100,
+        adminFees: adminFees / 100,
         date: new Date().toISOString().split('T')[0],
         status: 'Initiated',
         createdAt: serverTimestamp(),
@@ -457,7 +464,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
   try {
     const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
     if (!sellerId || !amount || amount <= 0 || !transactionReference) {
-      return res.status(400).json({ error: 'Invalid sellerId, amount, or transactionReference' });
+      return res.status(400).json({ error: 'Missing sellerId, amount, or transactionReference' });
     }
 
     const walletRef = doc(db, 'wallets', sellerId);
@@ -481,7 +488,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
       userId: sellerId,
       type: 'Withdrawal',
       description: `Withdrawal request for transaction ${transactionReference} - Awaiting Admin Approval`,
-      amount: amount,
+      amount,
       date: new Date().toISOString().split('T')[0],
       status: 'Pending',
       createdAt: serverTimestamp(),
@@ -592,7 +599,6 @@ app.post('/approve-payout', async (req, res) => {
       }
 
       await updateDoc(walletRef, {
-        availableBalance: (wallet.availableBalance || 0) + amount,
         pendingBalance: wallet.pendingBalance - amount,
         updatedAt: serverTimestamp(),
       });
@@ -621,7 +627,6 @@ app.post('/approve-payout', async (req, res) => {
       });
 
       await updateDoc(walletRef, {
-        availableBalance: (wallet.availableBalance || 0) + amount,
         pendingBalance: wallet.pendingBalance - amount,
         updatedAt: serverTimestamp(),
       });
@@ -759,7 +764,7 @@ app.get('/fetch-banks', async (req, res) => {
   }
 });
 
-// ... Keep all existing imports and code unchanged ...
+// /verify-recaptcha endpoint
 app.post('/verify-recaptcha', async (req, res) => {
   console.log('reCAPTCHA request:', req.body);
   const { token } = req.body;
@@ -788,6 +793,105 @@ app.post('/verify-recaptcha', async (req, res) => {
   } catch (error) {
     console.error('reCAPTCHA error:', error.message, error.response?.data);
     return res.status(500).json({ success: false, error: 'Server error', details: error.message });
+  }
+});
+
+// /send-product-approved-email endpoint
+app.post('/send-product-approved-email', async (req, res) => {
+  try {
+    const { productId, productName, sellerId, sellerEmail } = req.body;
+    if (!productId || !productName || !sellerId) {
+      return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
+    }
+
+    let email = sellerEmail;
+    if (!email) {
+      const userDoc = await getDoc(doc(db, 'users', sellerId));
+      if (!userDoc.exists()) {
+        return res.status(400).json({ error: 'Seller not found' });
+      }
+      email = userDoc.data().email;
+      if (!email) {
+        return res.status(400).json({ error: 'No email found for seller' });
+      }
+    }
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER || 'no-reply@formade.com',
+      to: email,
+      subject: 'Your Product is Live on Formade! 🎉',
+      text: `Congratulations! Your product "${productName}" (ID: ${productId}) has been approved and is now live on Formade. Customers can view and purchase it on our platform. Log in to your seller dashboard to manage your listings: ${process.env.DOMAIN}/seller-dashboard`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #1a73e8;">Congratulations! Your Product is Live! 🎉</h2>
+          <p>Dear Seller,</p>
+          <p>We’re excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Formade!</p>
+          <p>Customers can now view and purchase your product on our platform. To manage your listings or view performance, visit your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>Thank you for choosing Formade. Let’s make those sales soar!</p>
+          <p>Best regards,<br>The Formade Team</p>
+          <hr style="border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@formade.com">support@formade.com</a>.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Approval email sent to ${email} for product ${productId}`);
+    res.json({ status: 'success', message: 'Approval email sent to seller' });
+  } catch (error) {
+    console.error('Error sending approval email:', error);
+    res.status(500).json({ error: 'Failed to send approval email', details: error.message });
+  }
+});
+
+// /send-product-rejected-email endpoint
+app.post('/send-product-rejected-email', async (req, res) => {
+  try {
+    const { productId, productName, sellerId, sellerEmail } = req.body;
+    if (!productId || !productName || !sellerId) {
+      return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
+    }
+
+    let email = sellerEmail;
+    if (!email) {
+      const userDoc = await getDoc(doc(db, 'users', sellerId));
+      if (!userDoc.exists()) {
+        return res.status(400).json({ error: 'Seller not found' });
+      }
+      email = userDoc.data().email;
+      if (!email) {
+        return res.status(400).json({ error: 'No email found for seller' });
+      }
+    }
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER || 'no-reply@formade.com',
+      to: email,
+      subject: 'Update: Your Product Was Not Approved on Formade',
+      text: `Dear Seller, we're sorry to inform you that your product "${productName}" (ID: ${productId}) was not approved for listing on Formade. Please review our guidelines and resubmit or contact support for more details: https://formade.com/support. Log in to your seller dashboard to update your product: ${process.env.DOMAIN}/seller-dashboard`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
+          <p>Dear Seller,</p>
+          <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Formade after our team’s review.</p>
+          <p>Please review our <a href="https://formade.co.uk/guidelines" style="color: #1a73e8;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>For further assistance, contact our support team at <a href="mailto:support@formade.com" style="color: #1a73e8;">support@formade.com</a>.</p>
+          <p>Thank you for being part of Formade!</p>
+          <p>Best regards,<br>The Formade Team</p>
+          <hr style="border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Rejection email sent to ${email} for product ${productId}`);
+    res.json({ status: 'success', message: 'Rejection email sent to seller' });
+  } catch (error) {
+    console.error('Error sending rejection email:', error);
+    res.status(500).json({ error: 'Failed to send rejection email', details: error.message });
   }
 });
 
