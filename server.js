@@ -26,23 +26,6 @@ const db = getFirestore(appFirebase);
 console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
-console.log('EMAIL_USER:', process.env.EMAIL_USER ? 'Loaded' : 'Missing');
-console.log('EMAIL_PASS:', process.env.EMAIL_PASS ? 'Loaded' : 'Missing');
-
-// Configure CORS to allow specific origin
-app.use(cors({
-  origin: 'https://formade.com', // Replace with your actual frontend URL
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
-}));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
 
 const app = express();
 const upload = multer({
@@ -58,6 +41,21 @@ const upload = multer({
   },
 });
 
+// Configure CORS to allow all origins for now
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type'],
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 // Admin Stripe and Paystack account IDs
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
@@ -69,15 +67,6 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
-});
-
-// Verify Nodemailer configuration
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('Nodemailer configuration error:', error);
-  } else {
-    console.log('Nodemailer ready to send emails');
-  }
 });
 
 // Health check endpoint
@@ -558,7 +547,7 @@ app.post('/approve-payout', async (req, res) => {
 
     const country = transaction.country;
     if (!seller.paystackRecipientCode && country === 'Nigeria') {
-      const onboardingResponse = await axios.post(`${process.env.DOMAIN}/onboard-seller`, {
+      const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
         userId: sellerId,
         bankCode: transaction.bankCode,
         accountNumber: transaction.accountNumber,
@@ -566,7 +555,7 @@ app.post('/approve-payout', async (req, res) => {
       });
       if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
     } else if (!seller.stripeAccountId && country === 'United Kingdom') {
-      const onboardingResponse = await axios.post(`${process.env.DOMAIN}/onboard-seller`, {
+      const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
         userId: sellerId,
         country,
         email: transaction.email,
@@ -811,56 +800,46 @@ app.post('/verify-recaptcha', async (req, res) => {
 app.post('/send-product-approved-email', async (req, res) => {
   try {
     const { productId, productName, sellerId, sellerEmail } = req.body;
-    console.log('Received approval email request:', { productId, productName, sellerId, sellerEmail });
-
     if (!productId || !productName || !sellerId) {
-      console.error('Missing required fields:', { productId, productName, sellerId });
       return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
     }
 
     let email = sellerEmail;
     if (!email) {
-      console.log(`No sellerEmail provided, fetching from Firestore for sellerId: ${sellerId}`);
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
-        console.error(`Seller document not found for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'Seller not found' });
       }
       email = userDoc.data().email;
       if (!email) {
-        console.error(`No email found in seller document for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'No email found for seller' });
       }
-      console.log(`Fetched email from Firestore: ${email}`);
     }
 
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.error('Email configuration missing:', {
-        EMAIL_USER: process.env.EMAIL_USER ? 'Set' : 'Missing',
-        EMAIL_PASS: process.env.EMAIL_PASS ? 'Set' : 'Missing',
-      });
-      return res.status(500).json({ error: 'Email service not configured' });
-    }
-
-    const frontendUrl = 'https://formade.com';
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'no-reply@foremade.com',
+      from: process.env.EMAIL_USER || 'no-reply@formade.com',
       to: email,
-      subject: 'Your Product is Live on Foremade! 🎉',
-      text: `Great news! Your product "${productName}" has been approved and is now live on Foremade.
-             You can now view it on your store and start receiving orders.
-             To manage your listings or check your performance, visit: ${frontendUrl}/dashboard
-             Thanks for selling with Foremade. Let's make those sales soar!`,
+      subject: 'Your Product is Live on Formade! 🎉',
+      text: `Great news! Your product "${productName}" (ID: ${productId}) has been approved and is now live
+             on Formade.
+            Log in to your seller dashboard to manage your listings: ${process.env.DOMAIN}/dashboard`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #1a73e8;">Great News! Your Product is Live! 🎉</h2>
-          <p>We’re thrilled to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved and is now live on Foremade!</p>
-          <p>You can now view it on your store and start receiving orders. To manage your listings or check your performance, just click below:</p>
-          <a href="${frontendUrl}/dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
-          <p>Thanks for selling with Foremade. Let's make those sales soar!</p>
-          <p>Best regards,<br>The Foremade Team</p>
+          <h2 style="color: #1a73e8;">Congratulations! Your Product is Live! 🎉</h2>
+          
+          <p>We’re excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Formade!</p>
+          
+          <p>Customers can now view and purchase your product on our platform. To manage your listings or view performance, visit your seller dashboard:</p>
+          
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          
+          <p>Thank you for choosing Formade. Let’s make those sales soar!</p>
+          
+          <p>Best regards,<br>Your Formade Team</p>
+          
           <hr style="border-top: 1px solid #eee;">
-          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@foremade.com">support@foremade.com</a>.</p>
+          
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@formade.com">support@formade.com</a>.</p>
         </div>
       `,
     };
@@ -869,11 +848,7 @@ app.post('/send-product-approved-email', async (req, res) => {
     console.log(`Approval email sent to ${email} for product ${productId}`);
     res.json({ status: 'success', message: 'Approval email sent to seller' });
   } catch (error) {
-    console.error('Error sending approval email:', {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-    });
+    console.error('Error sending approval email:', error);
     res.status(500).json({ error: 'Failed to send approval email', details: error.message });
   }
 });
@@ -881,66 +856,38 @@ app.post('/send-product-approved-email', async (req, res) => {
 // /send-product-rejected-email endpoint
 app.post('/send-product-rejected-email', async (req, res) => {
   try {
-    const { productId, productName, sellerId, sellerEmail, reason } = req.body;
-    console.log('Received rejection email request:', { productId, productName, sellerId, sellerEmail, reason });
-
+    const { productId, productName, sellerId, sellerEmail } = req.body;
     if (!productId || !productName || !sellerId) {
-      console.error('Missing required fields:', { productId, productName, sellerId });
       return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
-    }
-    if (!reason) {
-      console.error('Missing rejection reason');
-      return res.status(400).json({ error: 'Missing rejection reason' });
     }
 
     let email = sellerEmail;
     if (!email) {
-      console.log(`No sellerEmail provided, fetching from Firestore for sellerId: ${sellerId}`);
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
-        console.error(`Seller document not found for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'Seller not found' });
       }
       email = userDoc.data().email;
       if (!email) {
-        console.error(`No email found in seller document for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'No email found for seller' });
       }
-      console.log(`Fetched email from Firestore: ${email}`);
     }
 
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.error('Email configuration missing:', {
-        EMAIL_USER: process.env.EMAIL_USER ? 'Set' : 'Missing',
-        EMAIL_PASS: process.env.EMAIL_PASS ? 'Set' : 'Missing',
-      });
-      return res.status(500).json({ error: 'Email service not configured' });
-    }
-
-    const frontendUrl = 'https://formade.com';
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'no-reply@foremade.com',
+      from: process.env.EMAIL_USER || 'no-reply@formade.com',
       to: email,
-      subject: 'Update: Your Product Was Not Approved on Foremade',
-      text: `Unfortunately, your product "${productName}" was not approved to go live on Foremade.
-             Reason: ${reason}
-             Please review and update the product details before resubmitting for approval.
-             To edit your listings, visit: ${frontendUrl}/dashboard/products
-             Go to seller dashboard: ${frontendUrl}/dashboard
-             If you need help or clarification, reach out to us at support@foremade.com.
-             - The Foremade Team`,
+      subject: 'Update: Your Product Was Not Approved on Formade',
+      text: `Dear Seller, we're sorry to inform you that your product "${productName}" (ID: ${productId}) was not approved for listing on Formade. Please review our guidelines and resubmit or contact support for more details: https://formade.com/support. Log in to your seller dashboard to update your product: ${process.env.DOMAIN}/seller-dashboard`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
           <p>Dear Seller,</p>
-          <p>Unfortunately, your product <strong>"${productName}"</strong> (ID: ${productId}) was not approved to go live on Foremade.</p>
-          <p><strong>Reason:</strong> ${reason}</p>
-          <p>Please review and update the product details before resubmitting for approval. To edit your listings, visit:</p>
-          <a href="${frontendUrl}/dashboard/products" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Edit Product Listings</a>
-          <p>Go to your seller dashboard:</p>
-          <a href="${frontendUrl}/dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Seller Dashboard</a>
-          <p>If you need help or clarification, feel free to reach out to us at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
-          <p>Best regards,<br>The Foremade Team</p>
+          <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Formade after our team’s review.</p>
+          <p>Please review our <a href="https://formade.co.uk/guidelines" style="color: #1a73e8;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>For further assistance, contact our support team at <a href="mailto:support@formade.com" style="color: #1a73e8;">support@formade.com</a>.</p>
+          <p>Thank you for being part of Formade!</p>
+          <p>Best regards,<br>The Formade Team</p>
           <hr style="border-top: 1px solid #eee;">
           <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
         </div>
@@ -948,14 +895,10 @@ app.post('/send-product-rejected-email', async (req, res) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`Rejection email sent to ${email} for product ${productId} with reason: ${reason}`);
+    console.log(`Rejection email sent to ${email} for product ${productId}`);
     res.json({ status: 'success', message: 'Rejection email sent to seller' });
   } catch (error) {
-    console.error('Error sending rejection email:', {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-    });
+    console.error('Error sending rejection email:', error);
     res.status(500).json({ error: 'Failed to send rejection email', details: error.message });
   }
 });
