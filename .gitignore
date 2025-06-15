@@ -13,6 +13,7 @@ build/
 out/
 *.log
 *.pid
+.md
 
 # Ignore OS-generated files
 .DS_Store
@@ -38,3 +39,4 @@ coverage/
 yarn-error.log
 .pnp/
 .yarn/
+.md
