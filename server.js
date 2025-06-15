@@ -26,6 +26,23 @@ const db = getFirestore(appFirebase);
 console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
+console.log('EMAIL_USER:', process.env.EMAIL_USER ? 'Loaded' : 'Missing');
+console.log('EMAIL_PASS:', process.env.EMAIL_PASS ? 'Loaded' : 'Missing');
+
+// Configure CORS to allow specific origin
+app.use(cors({
+  origin: 'https://formade.com', // Replace with your actual frontend URL
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type'],
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 const app = express();
 const upload = multer({
@@ -41,21 +58,6 @@ const upload = multer({
   },
 });
 
-// Configure CORS to allow all origins for now
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
-}));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
 // Admin Stripe and Paystack account IDs
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
@@ -67,6 +69,15 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+});
+
+// Verify Nodemailer configuration
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('Nodemailer configuration error:', error);
+  } else {
+    console.log('Nodemailer ready to send emails');
+  }
 });
 
 // Health check endpoint
@@ -800,23 +811,38 @@ app.post('/verify-recaptcha', async (req, res) => {
 app.post('/send-product-approved-email', async (req, res) => {
   try {
     const { productId, productName, sellerId, sellerEmail } = req.body;
+    console.log('Received approval email request:', { productId, productName, sellerId, sellerEmail });
+
     if (!productId || !productName || !sellerId) {
+      console.error('Missing required fields:', { productId, productName, sellerId });
       return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
     }
 
     let email = sellerEmail;
     if (!email) {
+      console.log(`No sellerEmail provided, fetching from Firestore for sellerId: ${sellerId}`);
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
+        console.error(`Seller document not found for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'Seller not found' });
       }
       email = userDoc.data().email;
       if (!email) {
+        console.error(`No email found in seller document for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'No email found for seller' });
       }
+      console.log(`Fetched email from Firestore: ${email}`);
     }
 
-    const frontendUrl = 'https://formade.com'; // Replace with your actual frontend URL
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.error('Email configuration missing:', {
+        EMAIL_USER: process.env.EMAIL_USER ? 'Set' : 'Missing',
+        EMAIL_PASS: process.env.EMAIL_PASS ? 'Set' : 'Missing',
+      });
+      return res.status(500).json({ error: 'Email service not configured' });
+    }
+
+    const frontendUrl = 'https://formade.com';
     const mailOptions = {
       from: process.env.EMAIL_USER || 'no-reply@foremade.com',
       to: email,
@@ -843,7 +869,11 @@ app.post('/send-product-approved-email', async (req, res) => {
     console.log(`Approval email sent to ${email} for product ${productId}`);
     res.json({ status: 'success', message: 'Approval email sent to seller' });
   } catch (error) {
-    console.error('Error sending approval email:', error);
+    console.error('Error sending approval email:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+    });
     res.status(500).json({ error: 'Failed to send approval email', details: error.message });
   }
 });
@@ -852,26 +882,42 @@ app.post('/send-product-approved-email', async (req, res) => {
 app.post('/send-product-rejected-email', async (req, res) => {
   try {
     const { productId, productName, sellerId, sellerEmail, reason } = req.body;
+    console.log('Received rejection email request:', { productId, productName, sellerId, sellerEmail, reason });
+
     if (!productId || !productName || !sellerId) {
+      console.error('Missing required fields:', { productId, productName, sellerId });
       return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
     }
     if (!reason) {
+      console.error('Missing rejection reason');
       return res.status(400).json({ error: 'Missing rejection reason' });
     }
 
     let email = sellerEmail;
     if (!email) {
+      console.log(`No sellerEmail provided, fetching from Firestore for sellerId: ${sellerId}`);
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
+        console.error(`Seller document not found for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'Seller not found' });
       }
       email = userDoc.data().email;
       if (!email) {
+        console.error(`No email found in seller document for sellerId: ${sellerId}`);
         return res.status(400).json({ error: 'No email found for seller' });
       }
+      console.log(`Fetched email from Firestore: ${email}`);
     }
 
-    const frontendUrl = 'https://formade.com'; // Replace with your actual frontend URL
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.error('Email configuration missing:', {
+        EMAIL_USER: process.env.EMAIL_USER ? 'Set' : 'Missing',
+        EMAIL_PASS: process.env.EMAIL_PASS ? 'Set' : 'Missing',
+      });
+      return res.status(500).json({ error: 'Email service not configured' });
+    }
+
+    const frontendUrl = 'https://formade.com';
     const mailOptions = {
       from: process.env.EMAIL_USER || 'no-reply@foremade.com',
       to: email,
@@ -905,7 +951,11 @@ app.post('/send-product-rejected-email', async (req, res) => {
     console.log(`Rejection email sent to ${email} for product ${productId} with reason: ${reason}`);
     res.json({ status: 'success', message: 'Rejection email sent to seller' });
   } catch (error) {
-    console.error('Error sending rejection email:', error);
+    console.error('Error sending rejection email:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+    });
     res.status(500).json({ error: 'Failed to send rejection email', details: error.message });
   }
 });
