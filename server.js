@@ -130,7 +130,7 @@ app.post('/create-payment-intent', async (req, res) => {
     }
 
     const totalAmountInCents = Math.round(amount);
-    const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee) * (currency === 'gbp' ? 100 : 1));
+    const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee + metadata.taxFee) * (currency === 'gbp' ? 100 : 1));
     const sellerId = metadata.sellerId;
 
     const paymentIntent = await stripe.paymentIntents.create({
@@ -284,7 +284,7 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
 
-    const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0);
+    const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0) + (metadata?.taxFee || 0);
     const sellerId = metadata.sellerId;
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
@@ -877,7 +877,7 @@ app.post('/send-product-rejected-email', async (req, res) => {
           <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
           <p>Dear Seller,</p>
           <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Formade after our team’s review.</p>
-          <p>Please review our <a href="https://formade.co.uk/guidelines" style="color: #1a73e8;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
+          <p>Please review our <a href="https://formade.com/guidelines" style="color: #1a73e8;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
           <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
           <p>For further assistance, contact our support team at <a href="mailto:support@formade.com" style="color: #1a73e8;">support@formade.com</a>.</p>
           <p>Thank you for being part of Formade!</p>
@@ -894,6 +894,91 @@ app.post('/send-product-rejected-email', async (req, res) => {
   } catch (error) {
     console.error('Error sending rejection email:', error);
     res.status(500).json({ error: 'Failed to send rejection email', details: error.message });
+  }
+});
+
+// /send-order-confirmation endpoint
+app.post('/send-order-confirmation', async (req, res) => {
+  try {
+    const { orderId, email, items, total, currency } = req.body;
+    if (!orderId || !email || !items || !total) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const orderRef = doc(db, 'orders', orderId);
+    const orderSnap = await getDoc(orderRef);
+    if (!orderSnap.exists()) {
+      return res.status(400).json({ error: 'Order not found' });
+    }
+
+    const itemRows = items.map(item => `
+      <tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 10px;">
+          <img src="${item.imageUrls[0]}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />
+        </td>
+        <td style="padding: 10px;">
+          ${item.name}
+        </td>
+        <td style="padding: 10px; text-align: center;">
+          ${item.quantity}
+        </td>
+        <td style="padding: 10px; text-align: right;">
+          ${currency === 'gbp' ? '£' : '₦'}${(item.price * item.quantity).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+        </td>
+      </tr>
+    `).join('');
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER || 'no-reply@formade.com',
+      to: email,
+      subject: `Order Confirmation - #${orderId}`,
+      text: `Thank you for your purchase on Formade! Your order #${orderId} has been received and is being processed. Total: ${currency}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #1a73e8;">Order Confirmation 🎉</h2>
+          <p>Dear Customer,</p>
+          <p>Thank you for shopping with Formade! We're excited to confirm that your order <strong>#${orderId}</strong> has been successfully received and is being processed.</p>
+          
+          <h3 style="color: #333; margin-top: 20px;">Order Details</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background-color: #f9f9f9;">
+                <th style="padding: 10px; text-align: left;">Image</th>
+                <th style="padding: 10px; text-align: left;">Product</th>
+                <th style="padding: 10px; text-align: center;">Quantity</th>
+                <th style="padding: 10px; text-align: right;">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemRows}
+            </tbody>
+          </table>
+          
+          <div style="margin-top: 20px; text-align: right;">
+            <p><strong>Subtotal:</strong> ${currency}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
+            <p style="font-size: 18px; font-weight: bold;"><strong>Total:</strong> ${currency}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
+          </div>
+          
+          <p style="margin-top: 20px;">You can view your order details and track its status by visiting:</p>
+          <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">View Order</a>
+          
+          <p style="margin-top: 20px;">If you have any questions, feel free to contact our support team at <a href="mailto:support@formade.com" style="color: #1a73e8;">support@formade.com</a>.</p>
+          
+          <p>Thank you for choosing Formade!</p>
+          <p>Best regards,<br>The Formade Team</p>
+          
+          <hr style="border-top: 1px solid #eee; margin-top: 20px;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
+    res.json({ status: 'success', message: 'Order confirmation email sent' });
+  } catch (error) {
+    console.error('Error sending order confirmation email:', error);
+    res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
   }
 });
 
