@@ -817,23 +817,23 @@ app.post('/send-product-approved-email', async (req, res) => {
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'no-reply@foremade.com',
+      from: process.env.EMAIL_USER || 'no-reply@formade.com',
       to: email,
-      subject: 'Your Product is Live on Foremade! 🎉',
-      text: `Great news! Your product "${productName}" has been approved and is now live on Foremade.
-             You can now view it on your store and start receiving orders.
-             To manage your listings or check your performance, visit: ${frontendUrl}/dashboard
-             Thanks for selling with Foremade. Let's make those sales soar!`,
+      subject: 'Your Product is Live on Formade! 🎉',
+      text: `Great news! Your product "${productName}" (ID: ${productId}) has been approved and is now live
+             on Formade.
+            Log in to your seller dashboard to manage your listings: ${process.env.DOMAIN}/dashboard`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #1a73e8;">Great News! Your Product is Live! 🎉</h2>
-          <p>We’re thrilled to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved and is now live on Foremade!</p>
-          <p>You can now view it on your store and start receiving orders. To manage your listings or check your performance, just click below:</p>
-          <a href="${frontendUrl}/dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
-          <p>Thanks for selling with Foremade. Let's make those sales soar!</p>
-          <p>Best regards,<br>The Foremade Team</p>
+          <h2 style="color: #1a73e8;">Great news! Your Product is Live! 🎉</h2>
+          
+          <p>We’re excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Formade!</p>
+          <p>Customers can now view and purchase your product on our platform. To manage your listings or view performance, visit your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>Thank you for choosing Formade. Let’s make those sales soar!</p>
+          <p>Best regards,<br>Your Formade Team</p>
           <hr style="border-top: 1px solid #eee;">
-          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@foremade.com">support@foremade.com</a>.</p>
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@formade.com">support@formade.com</a>.</p>
         </div>
       `,
     };
@@ -868,28 +868,20 @@ app.post('/send-product-rejected-email', async (req, res) => {
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'no-reply@foremade.com',
+      from: process.env.EMAIL_USER || 'no-reply@formade.com',
       to: email,
-      subject: 'Update: Your Product Was Not Approved on Foremade',
-      text: `Unfortunately, your product "${productName}" was not approved to go live on Foremade.
-             Reason: ${reason}
-             Please review and update the product details before resubmitting for approval.
-             To edit your listings, visit: ${frontendUrl}/dashboard/products
-             Go to seller dashboard: ${frontendUrl}/dashboard
-             If you need help or clarification, reach out to us at support@foremade.com.
-             - The Foremade Team`,
+      subject: 'Update: Your Product Was Not Approved on Formade',
+      text: `Dear Seller, we're sorry to inform you that your product "${productName}" (ID: ${productId}) was not approved for listing on Formade. Please review our guidelines and resubmit or contact support for more details: https://formade.com/support. Log in to your seller dashboard to update your product: ${process.env.DOMAIN}/seller-dashboard`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
           <p>Dear Seller,</p>
-          <p>Unfortunately, your product <strong>"${productName}"</strong> (ID: ${productId}) was not approved to go live on Foremade.</p>
-          <p><strong>Reason:</strong> ${reason}</p>
-          <p>Please review and update the product details before resubmitting for approval. To edit your listings, visit:</p>
-          <a href="${frontendUrl}/dashboard/products" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Edit Product Listings</a>
-          <p>Go to your seller dashboard:</p>
-          <a href="${frontendUrl}/dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Seller Dashboard</a>
-          <p>If you need help or clarification, feel free to reach out to us at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
-          <p>Best regards,<br>The Foremade Team</p>
+          <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Formade after our team’s review.</p>
+          <p>Please review our <a href="https://formade.co.uk/guidelines" style="color: #1a73e8;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>For further assistance, contact our support team at <a href="mailto:support@formade.com" style="color: #1a73e8;">support@formade.com</a>.</p>
+          <p>Thank you for being part of Formade!</p>
+          <p>Best regards,<br>The Formade Team</p>
           <hr style="border-top: 1px solid #eee;">
           <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
         </div>
