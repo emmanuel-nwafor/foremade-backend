@@ -669,7 +669,7 @@ app.post('/reject-payout', async (req, res) => {
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet won’t found' });
+      return res.status(400).json({ error: 'Wallet not found' });
     }
     const wallet = walletSnap.data();
 
@@ -708,7 +708,7 @@ app.post('/verify-bank-account', async (req, res) => {
     console.log('Request URL:', `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`);
 
     const response = await axios.get(
-      `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
+      `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${accountCode}`,
       {
         headers: {
           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
@@ -952,22 +952,23 @@ app.post('/send-product-rejected-email', async (req, res) => {
   }
 });
 
+// /send-order-confirmation endpoint
 app.post('/send-order-confirmation', async (req, res) => {
   try {
-    const { orderId, email, items, total, currency } = req.body;
-    console.log('Received payload for order confirmation:', {
+    const { orderId, email, items, total, currency, shippingDetails } = req.body;
+    console.log('Order confirmation payload:', {
       orderId,
       email,
       items,
       total,
       currency,
-      payload: JSON.stringify(req.body, null, 2),
+      shippingDetails,
     });
 
     // Validate payload
-    if (!orderId || !email || !items || !total) {
-      console.warn('Missing required fields:', { orderId, email, items, total });
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!orderId || !email || !items || !total || !currency) {
+      console.warn('Missing required fields:', { orderId, email, items, total, currency });
+      return res.status(400).json({ error: 'Missing orderId, email, items, total, or currency' });
     }
     if (!/\S+@\S+\.\S+/.test(email)) {
       console.warn('Invalid email format:', email);
@@ -978,159 +979,131 @@ app.post('/send-order-confirmation', async (req, res) => {
       return res.status(400).json({ error: 'Items must be a non-empty array' });
     }
     if (typeof total !== 'number' || total <= 0) {
-      console.warn('Invalid total amount:', total);
+      console.warn('Invalid total:', total);
       return res.status(400).json({ error: 'Total must be a positive number' });
     }
-    if (!['ngn', 'gbp'].includes(currency?.toLowerCase())) {
+    if (!['ngn', 'gbp'].includes(currency.toLowerCase())) {
       console.warn('Invalid currency:', currency);
       return res.status(400).json({ error: 'Invalid currency' });
+    }
+    if (!shippingDetails || typeof shippingDetails !== 'object') {
+      console.warn('Invalid shippingDetails:', shippingDetails);
+      return res.status(400).json({ error: 'Shipping details must be provided' });
     }
 
     // Validate items structure
     for (const item of items) {
       if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
-        console.warn('Invalid item structure:', item);
-        return res.status(400).json({ error: 'Invalid item structure: missing name, quantity, price, or imageUrls' });
+        console.warn('Invalid item:', item);
+        return res.status(400).json({ error: 'Invalid item: missing name, quantity, price, or imageUrls' });
       }
     }
 
-    // Verify order exists in Firebase
+    // Validate shipping details
+    const validatedShippingDetails = {
+      name: shippingDetails.name || 'Not Provided',
+      address: shippingDetails.address || 'Not Provided',
+      city: shippingDetails.city || '',
+      postalCode: shippingDetails.postalCode || '',
+      country: shippingDetails.country || 'Not Provided',
+      phone: shippingDetails.phone || 'Not Provided',
+      email: shippingDetails.email || email,
+    };
+
+    // Verify order exists
     const orderRef = doc(db, 'orders', orderId);
     const orderSnap = await getDoc(orderRef);
     if (!orderSnap.exists()) {
-      console.warn(`Order ${orderId} not found in Firestore`);
+      console.warn('Order not found:', orderId);
       return res.status(404).json({ error: 'Order not found' });
     }
-
-    const itemRows = items.map((item) => `
-      <tr style="border-bottom: 1px solid #eee;">
-        <td style="padding: 10px;">
-          <img src="${item.imageUrls[0] || 'https://via.placeholder.com/50'}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />
-        </td>
-        <td style="padding: 10px;">
-          ${item.name}
-        </td>
-        <td style="padding: 10px; text-align: center;">
-          ${item.quantity}
-        </td>
-        <td style="padding: 10px; text-align: right;">
-          ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${(item.price * item.quantity).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
-        </td>
-      </tr>
-    `).join('');
 
     const mailOptions = {
       from: `"Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
       to: email,
-      subject: `Order Confirmation - #${orderId}`,
-      text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
-      html: `<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f4; color: #333;">
-        <table role="presentation" style="width: 100%; max-width: 600px; margin: 20px auto; background-color: #ffffff; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+      subject: `Order #${orderId} Confirmation`,
+      text: `Thank you for shopping with Foremade! Your order #${orderId} is confirmed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
           <!-- Header -->
-          <tr>
-            <td style="padding: 20px; text-align: center; background-color: #1e40af; color: #ffffff;">
-              <h1 style="margin: 0; font-size: 24px; font-weight: bold;">Foremade</h1>
-              <p style="margin: 5px 0 0; font-size: 14px;">Thank You for Your Purchase!</p>
-            </td>
-          </tr>
+          <div style="text-align: center; padding-bottom: 20px; border-bottom: 1px solid #e5e7eb;">
+            <h1 style="font-size: 24px; color: #1a73e8; margin: 0;">Foremade</h1>
+            <p style="font-size: 14px; color: #4b5563; margin: 5px 0;">Thank you for your order! 🛒</p>
+          </div>
+
           <!-- Order Summary -->
-          <tr>
-            <td style="padding: 20px;">
-              <h2 style="font-size: 18px; margin: 0 0 10px; color: #1e40af;">Order Confirmation</h2>
-              <p style="margin: 0 0 10px; font-size: 14px;">
-                <strong>Order #:</strong> ${orderId}<br>
-                <strong>Date:</strong> ${new Date().toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}<br>
-                <strong>Total:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
-              </p>
-              <p style="margin: 0 0 20px; font-size: 14px;">
-                Your order has been received and is being processed. We'll notify you once it's shipped.
-              </p>
-            </td>
-          </tr>
+          <div style="padding: 20px 0;">
+            <h2 style="font-size: 18px; color: #1a73e8; margin: 0 0 10px;">Order Confirmation</h2>
+            <p style="font-size: 14px; color: #4b5563; margin: 0 0 10px;">
+              <strong>Order #:</strong> ${orderId}<br>
+              <strong>Date:</strong> ${new Date().toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}<br>
+              <strong>Total:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+            </p>
+            <p style="font-size: 14px; color: #4b5563; margin: 0;">
+              Your order is being processed. We'll notify you when it ships.
+            </p>
+          </div>
+
           <!-- Items -->
-          <tr>
-            <td style="padding: 0 20px 20px;">
-              <h3 style="font-size: 16px; margin: 0 0 10px; color: #1e40af;">Items Ordered</h3>
-              <table role="presentation" style="width: 100%; border-collapse: collapse;">
-                <thead>
-                  <tr style="background-color: #f9fafb;">
-                    <th style="padding: 10px; text-align: left; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Item</th>
-                    <th style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Qty</th>
-                    <th style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${items
-                    .map(
-                      (item) => `
-                      <tr>
-                        <td style="padding: 10px; font-size: 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-                          <table role="presentation" style="width: 100%;">
-                            <tr>
-                              <td style="width: 60px; padding-right: 10px;">
-                                <img
-                                  src="${item.imageUrls?.[0] || 'https://via.placeholder.com/150'}"
-                                  alt="${item.name || 'Product'}"
-                                  style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;"
-                                  onerror="this.src='https://via.placeholder.com/150';"
-                                />
-                              </td>
-                              <td>
-                                <span style="font-weight: bold;">${item.name || 'Unknown Product'}</span><br>
-                                <span style="color: #6b7280; font-size: 12px;">Seller: ${item.sellerId || 'Unknown'}</span>
-                              </td>
-                            </tr>
-                          </table>
-                        </td>
-                        <td style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-                          ${item.quantity || 1}
-                        </td>
-                        <td style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-                          ${currency.toUpperCase()}${item.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    `
-                    )
-                    .join('')}
-                </tbody>
-              </table>
-            </td>
-          </tr>
+          <div style="padding: 20px 0; border-bottom: 1px solid #e5e7eb;">
+            <h3 style="font-size: 16px; color: #1a73e8; margin: 0 0 10px;">Your Items</h3>
+            ${items
+              .map(
+                (item) => `
+              <div style="display: flex; align-items: center; padding: 10px 0; border-top: 1px solid #f3f4f6;">
+                <img
+                  src="${item.imageUrls[0] || 'https://via.placeholder.com/60'}"
+                  alt="${item.name || 'Product'}"
+                  style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px; margin-right: 12px;"
+                  onerror="this.src='https://via.placeholder.com/60';"
+                />
+                <div style="flex: 1;">
+                  <p style="font-size: 14px; font-weight: bold; color: #1f2937; margin: 0 0 4px;">${item.name || 'Unknown Product'}</p>
+                  <p style="font-size: 12px; color: #6b7280; margin: 0;">Qty: ${item.quantity || 1}</p>
+                  <p style="font-size: 12px; color: #6b7280; margin: 0;">
+                    ${currency.toUpperCase()}${(item.price * item.quantity).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+            `
+              )
+              .join('')}
+          </div>
+
           <!-- Shipping Details -->
-          <tr>
-            <td style="padding: 0 20px 20px;">
-              <h3 style="font-size: 16px; margin: 0 0 10px; color: #1e40af;">Shipping Information</h3>
-              <p style="margin: 0; font-size: 14px; line-height: 1.5;">
-                ${shippingDetails.name || 'Not Provided'}<br>
-                ${shippingDetails.address || 'Not Provided'}<br>
-                ${shippingDetails.city || ''}${shippingDetails.city && shippingDetails.postalCode ? ', ' : ''}${shippingDetails.postalCode || ''}<br>
-                ${shippingDetails.country || 'Not Provided'}<br>
-                <strong>Phone:</strong> ${shippingDetails.phone || 'Not Provided'}<br>
-                <strong>Email:</strong> ${shippingDetails.email || email}
-              </p>
-            </td>
-          </tr>
+          <div style="padding: 20px 0;">
+            <h3 style="font-size: 16px; color: #1a73e8; margin: 0 0 10px;">Shipping Details 📦</h3>
+            <p style="font-size: 14px; color: #4b5563; margin: 0; line-height: 1.5;">
+              ${validatedShippingDetails.name}<br>
+              ${validatedShippingDetails.address}<br>
+              ${validatedShippingDetails.city}${validatedShippingDetails.city && validatedShippingDetails.postalCode ? ', ' : ''}${validatedShippingDetails.postalCode}<br>
+              ${validatedShippingDetails.country}<br>
+              <strong>Phone:</strong> ${validatedShippingDetails.phone}<br>
+              <strong>Email:</strong> ${validatedShippingDetails.email}
+            </p>
+          </div>
+
+          <!-- CTA -->
+          <div style="text-align: center; padding: 20px 0; border-top: 1px solid #e5e7eb;">
+            <a
+              href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}"
+              style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: #ffffff; text-decoration: none; border-radius: 4px; font-size: 14px;"
+            >
+              View Order Details
+            </a>
+          </div>
+
           <!-- Footer -->
-          <tr>
-            <td style="padding: 20px; text-align: center; background-color: #f9fafb; border-top: 1px solid #e5e7eb;">
-              <p style="margin: 0 0 10px; font-size: 14px;">
-                <a
-                  href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}"
-                  style="color: #1e40af; text-decoration: none; font-weight: bold;"
-                >
-                  View Your Order Details
-                </a>
-              </p>
-              <p style="margin: 0; font-size: 12px; color: #6b7280;">
-                Need help? Contact us at <a href="mailto:support@foremade.com" style="color: #1e40af;">support@foremade.com</a>
-              </p>
-              <p style="margin: 10px 0 0; font-size: 12px; color: #6b7280;">
-                &copy; ${new Date().getFullYear()} Foremade. All rights reserved.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </body>`, // HTML content for the email
+          <div style="text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+            <p style="font-size: 12px; color: #6b7280; margin: 0;">
+              Need help? Contact <a href="mailto:support@foremade.com" style="color: #1a73e8; text-decoration: none;">support@foremade.com</a>
+            </p>
+            <p style="font-size: 12px; color: #6b7280; margin: 10px 0 0;">
+              © ${new Date().getFullYear()} Foremade. All rights reserved.
+            </p>
+          </div>
+        </div>
+      `,
     };
 
     await transporter.sendMail(mailOptions);
@@ -1140,7 +1113,7 @@ app.post('/send-order-confirmation', async (req, res) => {
     console.error('Error sending order confirmation email:', {
       message: error.message,
       stack: error.stack,
-      payload: JSON.stringify(req.body, null, 2),
+      payload: req.body,
     });
     res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
   }
