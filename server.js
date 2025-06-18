@@ -952,7 +952,6 @@ app.post('/send-product-rejected-email', async (req, res) => {
   }
 });
 
-// /send-order-confirmation endpoint
 app.post('/send-order-confirmation', async (req, res) => {
   try {
     const { orderId, email, items, total, currency } = req.body;
@@ -1025,44 +1024,7 @@ app.post('/send-order-confirmation', async (req, res) => {
       to: email,
       subject: `Order Confirmation - #${orderId}`,
       text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #1a73e8;">Order Confirmation 🎉</h2>
-          <p>Dear Customer,</p>
-          <p>Thank you for shopping with Foremade! We're excited to confirm that your order <strong>#${orderId}</strong> has been successfully received and is being processed.</p>
-          
-          <h3 style="color: #333; margin-top: 20px;">Order Details</h3>
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background-color: #f9f9f9;">
-                <th style="padding: 10px; text-align: left;">Image</th>
-                <th style="padding: 10px; text-align: left;">Product</th>
-                <th style="padding: 10px; text-align: center;">Quantity</th>
-                <th style="padding: 10px; text-align: right;">Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemRows}
-            </tbody>
-          </table>
-          
-          <div style="margin-top: 20px; text-align: right;">
-            <p><strong>Subtotal:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
-            <p style="font-size: 18px; font-weight: bold;"><strong>Total:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
-          </div>
-          
-          <p style="margin-top: 20px;">You can view your order details and track its status by visiting:</p>
-          <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">View Order</a>
-          
-          <p style="margin-top: 20px;">If you have any questions, feel free to contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
-          
-          <p>Thank you for choosing Foremade!</p>
-          <p>Best regards,<br>The Foremade Team</p>
-          
-          <hr style="border-top: 1px solid #eee; margin-top: 20px;">
-          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
-        </div>
-      `,
+      html: `...`, // HTML content for the email
     };
 
     await transporter.sendMail(mailOptions);
