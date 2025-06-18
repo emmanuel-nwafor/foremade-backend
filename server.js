@@ -36,7 +36,7 @@ const upload = multer({
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only images (JPEG, JPG, PNG, WEBP, GIF) and videos (MP4) are allowed.'));
+      cb(new Error('Invalid file type. Only images (JPEG, JPG, PNG, WEBP, GIF) and videos are allowed.'));
     }
   },
 });
@@ -794,15 +794,15 @@ app.post('/verify-recaptcha', async (req, res) => {
   }
 });
 
-// /send-product-approved-email endpoint
+// /send-product-approved-email endpoint (reused for order confirmation)
 app.post('/send-product-approved-email', async (req, res) => {
   try {
-    const { productId, productName, sellerId, sellerEmail } = req.body;
-    console.log('Received payload for product approved email:', { productId, productName, sellerId, sellerEmail });
+    const { productId, productName, sellerId, sellerEmail, orderId, items, total, currency } = req.body;
+    console.log('Received payload for email:', { productId, productName, sellerId, sellerEmail, orderId, items, total, currency });
 
-    if (!productId || !productName || !sellerId) {
-      console.warn('Missing required fields:', { productId, productName, sellerId, sellerEmail });
-      return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
+    if (!orderId && (!productId || !productName || !sellerId)) {
+      console.warn('Missing required fields:', { productId, productName, sellerId, sellerEmail, orderId, items, total });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
     let email = sellerEmail;
@@ -824,6 +824,84 @@ app.post('/send-product-approved-email', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
+    // Handle order confirmation
+    if (orderId && items && total) {
+      // Verify order exists
+      const orderRef = doc(db, 'orders', orderId);
+      const orderSnap = await getDoc(orderRef);
+      if (!orderSnap.exists()) {
+        console.warn(`Order ${orderId} not found in Firestore`);
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      const itemRows = items.map((item) => `
+        <tr style="border-bottom: 1px solid #eee;">
+          <td style="padding: 10px;">
+            <img src="${item.imageUrls[0] || 'https://via.placeholder.com/50'}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />
+          </td>
+          <td style="padding: 10px;">
+            ${item.name}
+          </td>
+          <td style="padding: 10px; text-align: center;">
+            ${item.quantity}
+          </td>
+          <td style="padding: 10px; text-align: right;">
+            ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${item.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+          </td>
+        </tr>
+      `).join('');
+
+      const mailOptions = {
+        from: `"Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+        to: email,
+        subject: `Order Confirmation - #${orderId}`,
+        text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a73e8;">Order Confirmation 🎉</h2>
+            <p>Dear Customer,</p>
+            <p>Thank you for shopping with Foremade! We're excited to confirm that your order <strong>#${orderId}</strong> has been successfully received and is being processed.</p>
+            
+            <h3 style="color: #333; margin-top: 20px;">Order Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background-color: #f9f9f9;">
+                  <th style="padding: 10px; text-align: left;">Image</th>
+                  <th style="padding: 10px; text-align: left;">Product</th>
+                  <th style="padding: 10px; text-align: center;">Quantity</th>
+                  <th style="padding: 10px; text-align: right;">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemRows}
+              </tbody>
+            </table>
+            
+            <div style="margin-top: 20px; text-align: right;">
+              <p><strong>Subtotal:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
+              <p style="font-size: 18px; font-weight: bold;"><strong>Total:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
+            </div>
+            
+            <p style="margin-top: 20px;">You can view your order details and track its status by visiting:</p>
+            <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">View Order</a>
+            
+            <p style="margin-top: 20px;">If you have any questions, feel free to contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
+            
+            <p>Thank you for choosing Foremade!</p>
+            <p>Best regards,<br>The Foremade Team</p>
+            
+            <hr style="border-top: 1px solid #eee; margin-top: 20px;">
+            <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
+          </div>
+        `,
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
+      return res.json({ status: 'success', message: 'Order confirmation email sent' });
+    }
+
+    // Handle product approval (original functionality)
     // Verify product exists
     const productRef = doc(db, 'products', productId);
     const productSnap = await getDoc(productRef);
@@ -833,7 +911,7 @@ app.post('/send-product-approved-email', async (req, res) => {
     }
 
     const mailOptions = {
-      from: `"Foremade Support" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+      from: `"Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
       to: email,
       subject: 'Your Product is Live on Foremade! 🎉',
       text: `Great news! Your product "${productName}" (ID: ${productId}) has been approved and is now live on Foremade. Log in to your seller dashboard to manage your listings: ${process.env.DOMAIN}/seller-dashboard`,
@@ -862,12 +940,12 @@ app.post('/send-product-approved-email', async (req, res) => {
 
     res.json({ status: 'success', message: 'Approval email sent to seller' });
   } catch (error) {
-    console.error('Error sending product approved email:', {
+    console.error('Error sending email:', {
       message: error.message,
       stack: error.stack,
       payload: req.body,
     });
-    res.status(500).json({ error: 'Failed to send approval email', details: error.message });
+    res.status(500).json({ error: 'Failed to send email', details: error.message });
   }
 });
 
@@ -949,132 +1027,6 @@ app.post('/send-product-rejected-email', async (req, res) => {
       payload: req.body,
     });
     res.status(500).json({ error: 'Failed to send rejection email', details: error.message });
-  }
-});
-
-// /send-order-confirmation endpoint
-app.post('/send-order-confirmation', async (req, res) => {
-  try {
-    const { orderId, email, items, total, currency } = req.body;
-    console.log('Received payload for order confirmation:', {
-      orderId,
-      email,
-      items,
-      total,
-      currency,
-      payload: JSON.stringify(req.body, null, 2),
-    });
-
-    // Validate payload
-    if (!orderId || !email || !items || !total) {
-      console.warn('Missing required fields:', { orderId, email, items, total });
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    if (!/\S+@\S+\.\S+/.test(email)) {
-      console.warn('Invalid email format:', email);
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
-    if (!Array.isArray(items) || items.length === 0) {
-      console.warn('Invalid items array:', items);
-      return res.status(400).json({ error: 'Items must be a non-empty array' });
-    }
-    if (typeof total !== 'number' || total <= 0) {
-      console.warn('Invalid total amount:', total);
-      return res.status(400).json({ error: 'Total must be a positive number' });
-    }
-    if (!['ngn', 'gbp'].includes(currency?.toLowerCase())) {
-      console.warn('Invalid currency:', currency);
-      return res.status(400).json({ error: 'Invalid currency' });
-    }
-
-    // Validate items structure
-    for (const item of items) {
-      if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
-        console.warn('Invalid item structure:', item);
-        return res.status(400).json({ error: 'Invalid item structure: missing name, quantity, price, or imageUrls' });
-      }
-    }
-
-    // Verify order exists in Firebase
-    const orderRef = doc(db, 'orders', orderId);
-    const orderSnap = await getDoc(orderRef);
-    if (!orderSnap.exists()) {
-      console.warn(`Order ${orderId} not found in Firestore`);
-      return res.status(404).json({ error: 'Order not found' });
-    }
-
-    const itemRows = items.map((item) => `
-      <tr style="border-bottom: 1px solid #eee;">
-        <td style="padding: 10px;">
-          <img src="${item.imageUrls[0] || 'https://via.placeholder.com/50'}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />
-        </td>
-        <td style="padding: 10px;">
-          ${item.name}
-        </td>
-        <td style="padding: 10px; text-align: center;">
-          ${item.quantity}
-        </td>
-        <td style="padding: 10px; text-align: right;">
-          ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${(item.price * item.quantity).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
-        </td>
-      </tr>
-    `).join('');
-
-    const mailOptions = {
-      from: `"Foremade Support" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
-      to: email,
-      subject: `Order Confirmation - #${orderId}`,
-      text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #1a73e8;">Order Confirmation 🎉</h2>
-          <p>Dear Customer,</p>
-          <p>Thank you for shopping with Foremade! We're excited to confirm that your order <strong>#${orderId}</strong> has been successfully received and is being processed.</p>
-          
-          <h3 style="color: #333; margin-top: 20px;">Order Details</h3>
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background-color: #f9f9f9;">
-                <th style="padding: 10px; text-align: left;">Image</th>
-                <th style="padding: 10px; text-align: left;">Product</th>
-                <th style="padding: 10px; text-align: center;">Quantity</th>
-                <th style="padding: 10px; text-align: right;">Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemRows}
-            </tbody>
-          </table>
-          
-          <div style="margin-top: 20px; text-align: right;">
-            <p><strong>Subtotal:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
-            <p style="font-size: 18px; font-weight: bold;"><strong>Total:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
-          </div>
-          
-          <p style="margin-top: 20px;">You can view your order details and track its status by visiting:</p>
-          <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">View Order</a>
-          
-          <p style="margin-top: 20px;">If you have any questions, feel free to contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
-          
-          <p>Thank you for choosing Foremade!</p>
-          <p>Best regards,<br>The Foremade Team</p>
-          
-          <hr style="border-top: 1px solid #eee; margin-top: 20px;">
-          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
-        </div>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
-    res.json({ status: 'success', message: 'Order confirmation email sent' });
-  } catch (error) {
-    console.error('Error sending order confirmation email:', {
-      message: error.message,
-      stack: error.stack,
-      payload: JSON.stringify(req.body, null, 2),
-    });
-    res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
   }
 });
 
