@@ -8,6 +8,7 @@ const axios = require('axios');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 // Firebase config
 const firebaseConfig = {
@@ -55,13 +56,22 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Admin Stripe and Paystack account IDs (set these in your .env file)
+// Admin Stripe and Paystack account IDs
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
 
+// Nodemailer transporter
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).send('OK');
+  res.status(200).json({ status: 'OK' });
 });
 
 // /upload endpoint
@@ -120,7 +130,7 @@ app.post('/create-payment-intent', async (req, res) => {
     }
 
     const totalAmountInCents = Math.round(amount);
-    const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee) * (currency === 'gbp' ? 100 : 1));
+    const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee + metadata.taxFee) * (currency === 'gbp' ? 100 : 1));
     const sellerId = metadata.sellerId;
 
     const paymentIntent = await stripe.paymentIntents.create({
@@ -158,7 +168,7 @@ app.post('/paystack-webhook', async (req, res) => {
 
     if (event.event === 'charge.success') {
       const { reference, amount, metadata } = event.data;
-      const amountInKobo = amount; // Paystack sends amount in kobo
+      const amountInKobo = amount;
       const sellerId = metadata.sellerId;
       const adminFees = metadata.adminFees || 0;
 
@@ -170,12 +180,11 @@ app.post('/paystack-webhook', async (req, res) => {
       const querySnapshot = await getDocs(q);
       if (querySnapshot.empty) {
         console.warn(`No Initiated transaction found for reference ${reference}`);
-        return res.status(200).json({ status: 'success' }); // Idempotency: skip if already processed
+        return res.status(200).json({ status: 'success' });
       }
 
-      const transactionDoc = querySnapshot.docs[0];
-      const transactionRef = doc(db, 'transactions', transactionDoc.id);
-      const netAmount = (amountInKobo - adminFees) / 100; // Convert to NGN
+      const transactionDoc = doc(db, 'transactions', querySnapshot.docs[0].id);
+      const netAmount = (amountInKobo - adminFees) / 100;
 
       const walletRef = doc(db, 'wallets', sellerId);
       const walletSnap = await getDoc(walletRef);
@@ -186,7 +195,7 @@ app.post('/paystack-webhook', async (req, res) => {
         updatedAt: serverTimestamp(),
       });
 
-      await updateDoc(transactionRef, {
+      await updateDoc(transactionDoc, {
         status: 'Completed',
         updatedAt: serverTimestamp(),
       });
@@ -261,7 +270,6 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     const { amount, email, currency = 'NGN', metadata } = req.body;
     console.log('Paystack Request Payload:', { amount, email, currency, metadata });
 
-    // Validate inputs
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
@@ -275,11 +283,10 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
 
-    const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0);
+    const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0) + (metadata?.taxFee || 0);
     const sellerId = metadata.sellerId;
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
-    // Use amount directly (already in kobo)
     const amountInKobo = Math.round(amount);
     if (isNaN(amountInKobo) || amountInKobo <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
@@ -311,13 +318,12 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     console.log('Paystack API Response:', response.data);
 
     if (response.data.status) {
-      // Store transaction as Initiated
       await addDoc(collection(db, 'transactions'), {
         userId: sellerId,
         type: 'Sale',
         description: `Sale initiated for payment ${reference}`,
-        amount: amountInKobo / 100, // Store in NGN
-        adminFees: adminFees / 100, // Store in NGN
+        amount: amountInKobo / 100,
+        adminFees: adminFees / 100,
         date: new Date().toISOString().split('T')[0],
         status: 'Initiated',
         createdAt: serverTimestamp(),
@@ -457,7 +463,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
   try {
     const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
     if (!sellerId || !amount || amount <= 0 || !transactionReference) {
-      return res.status(400).json({ error: 'Invalid sellerId, amount, or transactionReference' });
+      return res.status(400).json({ error: 'Missing sellerId, amount, or transactionReference' });
     }
 
     const walletRef = doc(db, 'wallets', sellerId);
@@ -481,7 +487,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
       userId: sellerId,
       type: 'Withdrawal',
       description: `Withdrawal request for transaction ${transactionReference} - Awaiting Admin Approval`,
-      amount: amount,
+      amount,
       date: new Date().toISOString().split('T')[0],
       status: 'Pending',
       createdAt: serverTimestamp(),
@@ -562,9 +568,8 @@ app.post('/approve-payout', async (req, res) => {
 
     const updatedSellerSnap = await getDoc(sellerRef);
     const updatedSeller = updatedSellerSnap.data();
-    const updatedCountry = updatedSeller.country;
 
-    if (updatedCountry === 'Nigeria') {
+    if (updatedSeller.country === 'Nigeria') {
       const recipientCode = updatedSeller.paystackRecipientCode;
       if (!recipientCode) {
         return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
@@ -592,7 +597,6 @@ app.post('/approve-payout', async (req, res) => {
       }
 
       await updateDoc(walletRef, {
-        availableBalance: (wallet.availableBalance || 0) + amount,
         pendingBalance: wallet.pendingBalance - amount,
         updatedAt: serverTimestamp(),
       });
@@ -607,7 +611,7 @@ app.post('/approve-payout', async (req, res) => {
         status: 'success',
         reference: transferResponse.data.data.reference,
       });
-    } else if (updatedCountry === 'United Kingdom') {
+    } else if (updatedSeller.country === 'United Kingdom') {
       const stripeAccountId = updatedSeller.stripeAccountId;
       if (!stripeAccountId) {
         return res.status(400).json({ error: 'Seller has not completed Stripe onboarding' });
@@ -621,7 +625,6 @@ app.post('/approve-payout', async (req, res) => {
       });
 
       await updateDoc(walletRef, {
-        availableBalance: (wallet.availableBalance || 0) + amount,
         pendingBalance: wallet.pendingBalance - amount,
         updatedAt: serverTimestamp(),
       });
@@ -666,7 +669,7 @@ app.post('/reject-payout', async (req, res) => {
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet not found' });
+      return res.status(400).json({ error: 'Wallet won’t found' });
     }
     const wallet = walletSnap.data();
 
@@ -756,6 +759,322 @@ app.get('/fetch-banks', async (req, res) => {
   } catch (error) {
     console.error('Fetch banks error:', error);
     res.status(500).json({ error: 'Failed to fetch banks', details: error.response?.data?.message || error.message });
+  }
+});
+
+// /verify-recaptcha endpoint
+app.post('/verify-recaptcha', async (req, res) => {
+  console.log('reCAPTCHA request:', req.body);
+  const { token } = req.body;
+  if (!token) {
+    console.error('No reCAPTCHA token provided');
+    return res.status(400).json({ success: false, error: 'No reCAPTCHA token provided' });
+  }
+  if (!process.env.RECAPTCHA_SECRET_KEY) {
+    console.error('RECAPTCHA_SECRET_KEY missing');
+    return res.status(500).json({ success: false, error: 'Server configuration error' });
+  }
+  try {
+    const response = await axios.post(
+      'https://www.google.com/recaptcha/api/siteverify',
+      new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET_KEY,
+        response: token,
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+    console.log('Google response:', response.data);
+    if (response.data.success) {
+      return res.json({ success: true, score: response.data.score });
+    }
+    return res.status(400).json({ success: false, error: 'reCAPTCHA verification failed', details: response.data['error-codes'] || [] });
+  } catch (error) {
+    console.error('reCAPTCHA error:', error.message, error.response?.data);
+    return res.status(500).json({ success: false, error: 'Server error', details: error.message });
+  }
+});
+
+// /send-product-approved-email endpoint
+app.post('/send-product-approved-email', async (req, res) => {
+  try {
+    const { productId, productName, sellerId, sellerEmail } = req.body;
+    console.log('Received payload for product approved email:', { productId, productName, sellerId, sellerEmail });
+
+    if (!productId || !productName || !sellerId) {
+      console.warn('Missing required fields:', { productId, productName, sellerId, sellerEmail });
+      return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
+    }
+
+    let email = sellerEmail;
+    if (!email) {
+      const userDoc = await getDoc(doc(db, 'users', sellerId));
+      if (!userDoc.exists()) {
+        console.warn(`Seller ${sellerId} not found in Firestore`);
+        return res.status(400).json({ error: 'Seller not found' });
+      }
+      email = userDoc.data().email;
+      if (!email) {
+        console.warn(`No email found for seller ${sellerId}`);
+        return res.status(400).json({ error: 'No email found for seller' });
+      }
+    }
+
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      console.warn('Invalid email format:', email);
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Verify product exists
+    const productRef = doc(db, 'products', productId);
+    const productSnap = await getDoc(productRef);
+    if (!productSnap.exists()) {
+      console.warn(`Product ${productId} not found in Firestore`);
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const mailOptions = {
+      from: `"Foremade Support" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+      to: email,
+      subject: 'Your Product is Live on Foremade! 🎉',
+      text: `Great news! Your product "${productName}" (ID: ${productId}) has been approved and is now live on Foremade. Log in to your seller dashboard to manage your listings: ${process.env.DOMAIN}/seller-dashboard`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #1a73e8;">Great news! Your Product is Live! 🎉</h2>
+          <p>We’re excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Foremade!</p>
+          <p>Customers can now view and purchase your product on our platform. To manage your listings or view performance, visit your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>Thank you for choosing Foremade. Let’s make those sales soar!</p>
+          <p>Best regards,<br>The Foremade Team</p>
+          <hr style="border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@foremade.com">support@foremade.com</a>.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Approval email sent to ${email} for product ${productId}`);
+
+    // Update product status in Firestore
+    await updateDoc(productRef, {
+      status: 'approved',
+      updatedAt: serverTimestamp(),
+    });
+
+    res.json({ status: 'success', message: 'Approval email sent to seller' });
+  } catch (error) {
+    console.error('Error sending product approved email:', {
+      message: error.message,
+      stack: error.stack,
+      payload: req.body,
+    });
+    res.status(500).json({ error: 'Failed to send approval email', details: error.message });
+  }
+});
+
+// /send-product-rejected-email endpoint
+app.post('/send-product-rejected-email', async (req, res) => {
+  try {
+    const { productId, productName, sellerId, sellerEmail, reason } = req.body;
+    console.log('Received payload for product rejected email:', { productId, productName, sellerId, sellerEmail, reason });
+
+    if (!productId || !productName || !sellerId || !reason) {
+      console.warn('Missing required fields:', { productId, productName, sellerId, sellerEmail, reason });
+      return res.status(400).json({ error: 'Missing productId, productName, sellerId, or reason' });
+    }
+
+    let email = sellerEmail;
+    if (!email) {
+      const userDoc = await getDoc(doc(db, 'users', sellerId));
+      if (!userDoc.exists()) {
+        console.warn(`Seller ${sellerId} not found in Firestore`);
+        return res.status(400).json({ error: 'Seller not found' });
+      }
+      email = userDoc.data().email;
+      if (!email) {
+        console.warn(`No email found for seller ${sellerId}`);
+        return res.status(400).json({ error: 'No email found for seller' });
+      }
+    }
+
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      console.warn('Invalid email format:', email);
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Verify product exists
+    const productRef = doc(db, 'products', productId);
+    const productSnap = await getDoc(productRef);
+    if (!productSnap.exists()) {
+      console.warn(`Product ${productId} not found in Firestore`);
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const mailOptions = {
+      from: `"Foremade Support" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+      to: email,
+      subject: 'Update: Your Product Was Not Approved on Foremade',
+      text: `Dear Seller, we're sorry to inform you that your product "${productName}" (ID: ${productId}) was not approved for listing on Foremade. Reason: ${reason}. Please review our guidelines and resubmit or contact support for more details: https://foremade.com/support. Log in to your seller dashboard to update your product: ${process.env.DOMAIN}/seller-dashboard`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
+          <p>Dear Seller,</p>
+          <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Foremade after our team’s review.</p>
+          <p><strong>Reason for Rejection:</strong> ${reason}</p>
+          <p>Please review our <a href="https://foremade.com/guidelines" style="color: #1a73e8;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>For further assistance, contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
+          <p>Thank you for being part of Foremade!</p>
+          <p>Best regards,<br>The Foremade Team</p>
+          <hr style="border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Rejection email sent to ${email} for product ${productId}`);
+
+    // Update product status in Firestore
+    await updateDoc(productRef, {
+      status: 'rejected',
+      rejectionReason: reason,
+      updatedAt: serverTimestamp(),
+    });
+
+    res.json({ status: 'success', message: 'Rejection email sent to seller' });
+  } catch (error) {
+    console.error('Error sending product rejected email:', {
+      message: error.message,
+      stack: error.stack,
+      payload: req.body,
+    });
+    res.status(500).json({ error: 'Failed to send rejection email', details: error.message });
+  }
+});
+
+// /send-order-confirmation endpoint
+app.post('/send-order-confirmation', async (req, res) => {
+  try {
+    const { orderId, email, items, total, currency } = req.body;
+    console.log('Received payload for order confirmation:', {
+      orderId,
+      email,
+      items,
+      total,
+      currency,
+      payload: JSON.stringify(req.body, null, 2),
+    });
+
+    // Validate payload
+    if (!orderId || !email || !items || !total) {
+      console.warn('Missing required fields:', { orderId, email, items, total });
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      console.warn('Invalid email format:', email);
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      console.warn('Invalid items array:', items);
+      return res.status(400).json({ error: 'Items must be a non-empty array' });
+    }
+    if (typeof total !== 'number' || total <= 0) {
+      console.warn('Invalid total amount:', total);
+      return res.status(400).json({ error: 'Total must be a positive number' });
+    }
+    if (!['ngn', 'gbp'].includes(currency?.toLowerCase())) {
+      console.warn('Invalid currency:', currency);
+      return res.status(400).json({ error: 'Invalid currency' });
+    }
+
+    // Validate items structure
+    for (const item of items) {
+      if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
+        console.warn('Invalid item structure:', item);
+        return res.status(400).json({ error: 'Invalid item structure: missing name, quantity, price, or imageUrls' });
+      }
+    }
+
+    // Verify order exists in Firebase
+    const orderRef = doc(db, 'orders', orderId);
+    const orderSnap = await getDoc(orderRef);
+    if (!orderSnap.exists()) {
+      console.warn(`Order ${orderId} not found in Firestore`);
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const itemRows = items.map((item) => `
+      <tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 10px;">
+          <img src="${item.imageUrls[0] || 'https://via.placeholder.com/50'}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />
+        </td>
+        <td style="padding: 10px;">
+          ${item.name}
+        </td>
+        <td style="padding: 10px; text-align: center;">
+          ${item.quantity}
+        </td>
+        <td style="padding: 10px; text-align: right;">
+          ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${(item.price * item.quantity).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+        </td>
+      </tr>
+    `).join('');
+
+    const mailOptions = {
+      from: `"Foremade Support" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+      to: email,
+      subject: `Order Confirmation - #${orderId}`,
+      text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #1a73e8;">Order Confirmation 🎉</h2>
+          <p>Dear Customer,</p>
+          <p>Thank you for shopping with Foremade! We're excited to confirm that your order <strong>#${orderId}</strong> has been successfully received and is being processed.</p>
+          
+          <h3 style="color: #333; margin-top: 20px;">Order Details</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background-color: #f9f9f9;">
+                <th style="padding: 10px; text-align: left;">Image</th>
+                <th style="padding: 10px; text-align: left;">Product</th>
+                <th style="padding: 10px; text-align: center;">Quantity</th>
+                <th style="padding: 10px; text-align: right;">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemRows}
+            </tbody>
+          </table>
+          
+          <div style="margin-top: 20px; text-align: right;">
+            <p><strong>Subtotal:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
+            <p style="font-size: 18px; font-weight: bold;"><strong>Total:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
+          </div>
+          
+          <p style="margin-top: 20px;">You can view your order details and track its status by visiting:</p>
+          <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">View Order</a>
+          
+          <p style="margin-top: 20px;">If you have any questions, feel free to contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
+          
+          <p>Thank you for choosing Foremade!</p>
+          <p>Best regards,<br>The Foremade Team</p>
+          
+          <hr style="border-top: 1px solid #eee; margin-top: 20px;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
+    res.json({ status: 'success', message: 'Order confirmation email sent' });
+  } catch (error) {
+    console.error('Error sending order confirmation email:', {
+      message: error.message,
+      stack: error.stack,
+      payload: JSON.stringify(req.body, null, 2),
+    });
+    res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
   }
 });
 
