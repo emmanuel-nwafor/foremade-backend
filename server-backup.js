@@ -1024,111 +1024,14 @@ app.post('/send-order-confirmation', async (req, res) => {
       to: email,
       subject: `Order Confirmation - #${orderId}`,
       text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
-      html: `<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f4; color: #333;">
-        <div role="presentation" style="width: 100%; max-width: 600px; margin: 20px auto; background-color: #ffffff; border-collapse: collapse; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-          <tr>
-            <td style="padding: 20px; text-align: center; background-color: #1e40af; color: #ffffff;">
-              <h1 style="margin: 0; font-size: 24px; font-weight: bold;">Foremade</h1>
-              <p style="margin: 5px 0 0; font-size: 14px;">Thank You for Your Purchase!</p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 20px;">
-              <h2 style="font-size: 18px; margin: 0 0 10px; color: #1e40af;">Order Confirmation</h2>
-              <p style="margin: 0 0 10px; font-size: 14px;">
-                <strong>Order #:</strong> ${orderId}<br>
-                <strong>Date:</strong> ${new Date().toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}<br>
-                <strong>Total:</strong> ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
-              </p>
-              <p style="margin: 0 0 20px; font-size: 14px;">
-                Your order has been received and is being processed. We'll notify you once it's shipped.
-              </p>
-            </td>
-          </tr>
-          <!-- Items -->
-          <tr>
-            <td style="padding: 0 20px 20px;">
-              <h3 style="font-size: 16px; margin: 0 0 10px; color: #1e40af;">Items Ordered</h3>
-              <table role="presentation" style="width: 100%; border-collapse: collapse;">
-                <thead>
-                  <tr style="background-color: #f9fafb;">
-                    <th style="padding: 10px; text-align: left; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Item</th>
-                    <th style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Qty</th>
-                    <th style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${items
-                    .map(
-                      (item) => `
-                      <tr>
-                        <td style="padding: 10px; font-size: 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-                          <table role="presentation" style="width: 100%;">
-                            <tr>
-                              <td style="width: 60px; padding-right: 10px;">
-                                <img
-                                  src="${item.imageUrls?.[0] || 'https://via.placeholder.com/150'}"
-                                  alt="${item.name || 'Product'}"
-                                  style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;"
-                                  onerror="this.src='https://via.placeholder.com/150';"
-                                />
-                              </td>
-                              <td>
-                                <span style="font-weight: bold;">${item.name || 'Unknown Product'}</span><br>
-                                <span style="color: #6b7280; font-size: 12px;">Seller: ${item.sellerId || 'Unknown'}</span>
-                              </td>
-                            </tr>
-                          </table>
-                        </td>
-                        <td style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-                          ${item.quantity || 1}
-                        </td>
-                        <td style="padding: 10px; text-align: right; font-size: 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
-                          ${currency.toUpperCase()}${item.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    `
-                    )
-                    .join('')}
-                </tbody>
-              </table>
-            </td>
-          </tr>
-          <!-- Shipping Details -->
-          <tr>
-            <td style="padding: 0 20px 20px;">
-              <h3 style="font-size: 16px; margin: 0 0 10px; color: #1e40af;">Shipping Information</h3>
-              <p style="margin: 0; font-size: 14px; line-height: 1.5;">
-                ${shippingDetails.name || 'Not Provided'}<br>
-                ${shippingDetails.address || 'Not Provided'}<br>
-                ${shippingDetails.city || ''}${shippingDetails.city && shippingDetails.postalCode ? ', ' : ''}${shippingDetails.postalCode || ''}<br>
-                ${shippingDetails.country || 'Not Provided'}<br>
-                <strong>Phone:</strong> ${shippingDetails.phone || 'Not Provided'}<br>
-                <strong>Email:</strong> ${shippingDetails.email || email}
-              </p>
-            </td>
-          </tr>
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 20px; text-align: center; background-color: #f9fafb; border-top: 1px solid #e5e7eb;">
-              <p style="margin: 0 0 10px; font-size: 14px;">
-                <a
-                  href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}"
-                  style="color: #1e40af; text-decoration: none; font-weight: bold;"
-                >
-                  View Your Order Details
-                </a>
-              </p>
-              <p style="margin: 0; font-size: 12px; color: #6b7280;">
-                Need help? Contact us at <a href="mailto:support@foremade.com" style="color: #1e40af;">support@foremade.com</a>
-              </p>
-              <p style="margin: 10px 0 0; font-size: 12px; color: #6b7280;">
-                &copy; ${new Date().getFullYear()} Foremade. All rights reserved.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </div>`, // HTML content for the email
+      html: `<p>
+              Thank you for shopping with Foremade! 🛒
+              Your order #order-123 has been placed.
+              View your order here: https://foremade.com/order-confirmation?orderId=order-${orderId}
+              Questions? Contact support@foremade.com
+              
+              Foremade Team 📦
+            </p>`, 
     };
 
     await transporter.sendMail(mailOptions);

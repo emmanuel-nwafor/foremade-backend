@@ -458,31 +458,57 @@ app.post('/onboard-seller', async (req, res) => {
   }
 });
 
-// /initiate-seller-payout endpoint
+// Updated /initiate-seller-payout endpoint to allow withdrawals from pendingBalance
 app.post('/initiate-seller-payout', async (req, res) => {
   try {
     const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
-    if (!sellerId || !amount || amount <= 0 || !transactionReference) {
-      return res.status(400).json({ error: 'Missing sellerId, amount, or transactionReference' });
+    console.log('Initiating seller payout:', { sellerId, amount, transactionReference, country });
+
+    if (!sellerId || !amount || amount <= 0 || !transactionReference || !country) {
+      console.warn('Missing required fields:', { sellerId, amount, transactionReference, country });
+      return res.status(400).json({ error: 'Missing sellerId, amount, transactionReference, or country' });
     }
 
+    // Verify seller's onboarding status
+    const sellerRef = doc(db, 'sellers', sellerId);
+    const sellerSnap = await getDoc(sellerRef);
+    if (!sellerSnap.exists()) {
+      console.warn(`Seller ${sellerId} not found`);
+      return res.status(400).json({ error: 'Seller not found' });
+    }
+    const sellerData = sellerSnap.data();
+    if (country === 'Nigeria' && !sellerData.paystackRecipientCode) {
+      console.warn(`Seller ${sellerId} not onboarded for Paystack`);
+      return res.status(400).json({ error: 'Seller not onboarded for Paystack' });
+    }
+    if (country === 'United Kingdom' && !sellerData.stripeAccountId) {
+      console.warn(`Seller ${sellerId} not onboarded for Stripe`);
+      return res.status(400).json({ error: 'Seller not onboarded for Stripe' });
+    }
+
+    // Check wallet balance
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
+      console.warn(`Wallet not found for seller ${sellerId}`);
       return res.status(400).json({ error: 'Wallet not found' });
     }
     const wallet = walletSnap.data();
 
-    if (wallet.availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient available balance' });
+    // Allow withdrawals from pendingBalance
+    if (wallet.pendingBalance < amount) {
+      console.warn(`Insufficient pending balance for seller ${sellerId}: ${wallet.pendingBalance} < ${amount}`);
+      return res.status(400).json({ error: 'Insufficient pending balance' });
     }
 
+    // Move funds from pendingBalance to a temporary hold for admin approval
     await updateDoc(walletRef, {
-      availableBalance: wallet.availableBalance - amount,
-      pendingBalance: (wallet.pendingBalance || 0) + amount,
+      pendingBalance: wallet.pendingBalance - amount,
+      payoutHoldBalance: (wallet.payoutHoldBalance || 0) + amount, // New field to track held funds
       updatedAt: serverTimestamp(),
     });
 
+    // Log withdrawal request for admin approval
     const transactionDoc = await addDoc(collection(db, 'transactions'), {
       userId: sellerId,
       type: 'Withdrawal',
@@ -498,6 +524,8 @@ app.post('/initiate-seller-payout', async (req, res) => {
       email,
     });
 
+    console.log(`Payout request initiated for seller ${sellerId}: ${amount} for transaction ${transactionReference}`);
+
     res.json({
       status: 'success',
       transactionId: transactionDoc.id,
@@ -509,69 +537,63 @@ app.post('/initiate-seller-payout', async (req, res) => {
   }
 });
 
-// /approve-payout endpoint
+// Updated /approve-payout endpoint to handle funds from payoutHoldBalance
 app.post('/approve-payout', async (req, res) => {
   try {
     const { transactionId, sellerId } = req.body;
+    console.log('Approving payout:', { transactionId, sellerId });
+
     if (!transactionId || !sellerId) {
+      console.warn('Missing transactionId or sellerId');
       return res.status(400).json({ error: 'Missing transactionId or sellerId' });
     }
 
+    // Verify transaction
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
     if (!transactionSnap.exists()) {
+      console.warn(`Transaction ${transactionId} not found`);
       return res.status(400).json({ error: 'Transaction not found' });
     }
     const transaction = transactionSnap.data();
 
     if (transaction.status !== 'Pending') {
+      console.warn(`Transaction ${transactionId} is not in pending state: ${transaction.status}`);
       return res.status(400).json({ error: 'Transaction is not in pending state' });
     }
 
+    // Verify wallet
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
+      console.warn(`Wallet not found for seller ${sellerId}`);
       return res.status(400).json({ error: 'Wallet not found' });
     }
     const wallet = walletSnap.data();
 
     const amount = transaction.amount;
 
+    // Check payoutHoldBalance
+    if ((wallet.payoutHoldBalance || 0) < amount) {
+      console.warn(`Insufficient payout hold balance for seller ${sellerId}: ${(wallet.payoutHoldBalance || 0)} < ${amount}`);
+      return res.status(400).json({ error: 'Insufficient payout hold balance' });
+    }
+
+    // Verify seller onboarding
     const sellerRef = doc(db, 'sellers', sellerId);
     const sellerSnap = await getDoc(sellerRef);
     if (!sellerSnap.exists()) {
+      console.warn(`Seller ${sellerId} not found`);
       return res.status(400).json({ error: 'Seller not found' });
     }
     const seller = sellerSnap.data();
 
     const country = transaction.country;
-    if (!seller.paystackRecipientCode && country === 'Nigeria') {
-      const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
-        userId: sellerId,
-        bankCode: transaction.bankCode,
-        accountNumber: transaction.accountNumber,
-        country,
-      });
-      if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
-    } else if (!seller.stripeAccountId && country === 'United Kingdom') {
-      const onboardingResponse = await axios.post('http://localhost:5000/onboard-seller', {
-        userId: sellerId,
-        country,
-        email: transaction.email,
-      });
-      if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
-      return res.json({
-        status: 'redirect',
-        redirectUrl: onboardingResponse.data.redirectUrl,
-      });
-    }
 
-    const updatedSellerSnap = await getDoc(sellerRef);
-    const updatedSeller = updatedSellerSnap.data();
-
-    if (updatedSeller.country === 'Nigeria') {
-      const recipientCode = updatedSeller.paystackRecipientCode;
+    if (country === 'Nigeria') {
+      const recipientCode = seller.paystackRecipientCode;
       if (!recipientCode) {
+        console.warn(`Seller ${sellerId} has not completed Paystack onboarding`);
         return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
       }
 
@@ -593,27 +615,33 @@ app.post('/approve-payout', async (req, res) => {
       );
 
       if (!transferResponse.data.status) {
+        console.error('Paystack transfer failed:', transferResponse.data);
         throw new Error('Failed to initiate Paystack transfer');
       }
 
+      // Update wallet: remove from payoutHoldBalance
       await updateDoc(walletRef, {
-        pendingBalance: wallet.pendingBalance - amount,
+        payoutHoldBalance: wallet.payoutHoldBalance - amount,
         updatedAt: serverTimestamp(),
       });
 
+      // Update transaction status
       await updateDoc(transactionRef, {
         status: 'Completed',
         updatedAt: serverTimestamp(),
         payoutReference: transferResponse.data.data.reference,
       });
 
+      console.log(`Payout approved for seller ${sellerId}: ${amount} via Paystack, reference ${transferResponse.data.data.reference}`);
+
       res.json({
         status: 'success',
         reference: transferResponse.data.data.reference,
       });
-    } else if (updatedSeller.country === 'United Kingdom') {
-      const stripeAccountId = updatedSeller.stripeAccountId;
+    } else if (country === 'United Kingdom') {
+      const stripeAccountId = seller.stripeAccountId;
       if (!stripeAccountId) {
+        console.warn(`Seller ${sellerId} has not completed Stripe onboarding`);
         return res.status(400).json({ error: 'Seller has not completed Stripe onboarding' });
       }
 
@@ -624,21 +652,26 @@ app.post('/approve-payout', async (req, res) => {
         description: `Payout for transaction ${transaction.reference}`,
       });
 
+      // Update wallet: remove from payoutHoldBalance
       await updateDoc(walletRef, {
-        pendingBalance: wallet.pendingBalance - amount,
+        payoutHoldBalance: wallet.payoutHoldBalance - amount,
         updatedAt: serverTimestamp(),
       });
 
+      // Update transaction status
       await updateDoc(transactionRef, {
         status: 'Completed',
         updatedAt: serverTimestamp(),
       });
+
+      console.log(`Payout approved for seller ${sellerId}: ${amount} via Stripe, transfer ${transfer.id}`);
 
       res.json({
         status: 'success',
         transferId: transfer.id,
       });
     } else {
+      console.warn(`Unsupported country: ${country}`);
       res.status(400).json({ error: 'Unsupported country' });
     }
   } catch (error) {
@@ -647,48 +680,60 @@ app.post('/approve-payout', async (req, res) => {
   }
 });
 
-// /reject-payout endpoint
+// Updated /reject-payout endpoint to return funds to pendingBalance
 app.post('/reject-payout', async (req, res) => {
   try {
     const { transactionId, sellerId } = req.body;
+    console.log('Rejecting payout:', { transactionId, sellerId });
+
     if (!transactionId || !sellerId) {
+      console.warn('Missing transactionId or sellerId');
       return res.status(400).json({ error: 'Missing transactionId or sellerId' });
     }
 
+    // Verify transaction
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
     if (!transactionSnap.exists()) {
+      console.warn(`Transaction ${transactionId} not found`);
       return res.status(400).json({ error: 'Transaction not found' });
     }
     const transaction = transactionSnap.data();
 
     if (transaction.status !== 'Pending') {
+      console.warn(`Transaction ${transactionId} is not in pending state: ${transaction.status}`);
       return res.status(400).json({ error: 'Transaction is not in pending state' });
     }
 
+    // Verify wallet
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet won’t found' });
+      console.warn(`Wallet not found for seller ${sellerId}`);
+      return res.status(400).json({ error: 'Wallet not found' });
     }
     const wallet = walletSnap.data();
 
     const amount = transaction.amount;
 
+    // Move funds back from payoutHoldBalance to pendingBalance
     await updateDoc(walletRef, {
-      availableBalance: wallet.availableBalance + amount,
-      pendingBalance: wallet.pendingBalance - amount,
+      pendingBalance: (wallet.pendingBalance || 0) + amount,
+      payoutHoldBalance: (wallet.payoutHoldBalance || 0) - amount,
       updatedAt: serverTimestamp(),
     });
 
+    // Update transaction status
     await updateDoc(transactionRef, {
       status: 'Rejected',
       updatedAt: serverTimestamp(),
     });
 
+    console.log(`Payout rejected for seller ${sellerId}: ${amount} returned to pending balance`);
+
     res.json({
       status: 'success',
-      message: 'Payout rejected and funds returned to available balance',
+      message: 'Payout rejected and funds returned to pending balance',
     });
   } catch (error) {
     console.error('Payout rejection error:', error);
@@ -878,7 +923,7 @@ app.post('/send-product-rejected-email', async (req, res) => {
     console.log('Received payload for product rejected email:', { productId, productName, sellerId, sellerEmail, reason });
 
     if (!productId || !productName || !sellerId || !reason) {
-      console.warn('Missing required fields:', { productId, productName, sellerId, sellerEmail, reason });
+      console.warn('Missing required fields:', { productId, productName, sellerId, reason });
       return res.status(400).json({ error: 'Missing productId, productName, sellerId, or reason' });
     }
 
@@ -988,9 +1033,9 @@ app.post('/send-order-confirmation', async (req, res) => {
 
     // Validate items structure
     for (const item of items) {
-      if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
+      if (!item.id || !item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
         console.warn('Invalid item structure:', item);
-        return res.status(400).json({ error: 'Invalid item structure: missing name, quantity, price, or imageUrls' });
+        return res.status(400).json({ error: 'Invalid item structure: missing id, name, quantity, price, or imageUrls' });
       }
     }
 
@@ -998,7 +1043,7 @@ app.post('/send-order-confirmation', async (req, res) => {
     const orderRef = doc(db, 'orders', orderId);
     const orderSnap = await getDoc(orderRef);
     if (!orderSnap.exists()) {
-      console.warn(`Order ${orderId} not found in Firestore`);
+      console.warn('Order ${orderId} not found in Firestore');
       return res.status(404).json({ error: 'Order not found' });
     }
 
@@ -1024,14 +1069,40 @@ app.post('/send-order-confirmation', async (req, res) => {
       to: email,
       subject: `Order Confirmation - #${orderId}`,
       text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
-      html: `<p>
-              Thank you for shopping with Foremade! 🛒
-              Your order #order-123 has been placed.
-              View your order here: https://foremade.com/order-confirmation?orderId=order-${orderId}
-              Questions? Contact support@foremade.com
-              
-              Foremade Team 📦
-            </p>`, 
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #1a73e8;">Order Confirmation - #${orderId}</h2>
+          <p>Thank you for shopping with Foremade! 🛒 Your order has been successfully placed and is now being processed.</p>
+          <h3>Order Details</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background-color: #f5f5f5;">
+                <th style="padding: 10px; text-align: left;">Product</th>
+                <th style="padding: 10px; text-align: left;">Name</th>
+                <th style="padding: 10px; text-align: center;">Quantity</th>
+                <th style="padding: 10px; text-align: right;">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemRows}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3" style="padding: 10px; text-align: right; font-weight: bold;">Total:</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold;">
+                  ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+          <p style="margin-top: 20px;">You can view your order details and track its progress here:</p>
+          <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">View Order</a>
+          <p>If you have any questions, feel free to contact our support team at <a href="mailto:support@foremade.com">support@foremade.com</a>.</p>
+          <p>Best regards,<br>The Foremade Team</p>
+          <hr style="border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
+        </div>
+      `,
     };
 
     await transporter.sendMail(mailOptions);
@@ -1044,6 +1115,108 @@ app.post('/send-order-confirmation', async (req, res) => {
       payload: JSON.stringify(req.body, null, 2),
     });
     res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
+  }
+});
+
+// Updated /process-checkout-success endpoint to ensure transactions are logged for admin approval
+app.post('/process-checkout-success', async (req, res) => {
+  try {
+    const { orderId, amount, currency, metadata, reference } = req.body;
+    console.log('Processing checkout success:', { orderId, amount, currency, metadata, reference });
+
+    // Validate required fields
+    if (!orderId || !amount || !currency || !metadata?.sellerId || !reference) {
+      console.warn('Missing required fields:', { orderId, amount, currency, metadata, reference });
+      return res.status(400).json({ error: 'Missing orderId, amount, currency, sellerId, or reference' });
+    }
+
+    if (!['ngn', 'gbp'].includes(currency.toLowerCase())) {
+      console.warn('Invalid currency:', currency);
+      return res.status(400).json({ error: 'Invalid currency' });
+    }
+
+    if (amount <= 0) {
+      console.warn('Invalid amount:', amount);
+      return res.status(400).json({ error: 'Amount must be positive' });
+    }
+
+    // Verify order exists
+    const orderRef = doc(db, 'orders', orderId);
+    const orderSnap = await getDoc(orderRef);
+    if (!orderSnap.exists()) {
+      console.warn(`Order ${orderId} not found in Firestore`);
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Extract fees from metadata (in dollars)
+    const { sellerId, taxFee = 0, buyerProtectionFee = 0, handlingFee = 0 } = metadata;
+    const totalFees = taxFee + buyerProtectionFee + handlingFee;
+
+    // Calculate net amount for seller
+    const amountInBaseUnit = currency.toLowerCase() === 'ngn' ? amount : amount / 100; // Paystack uses kobo, Stripe uses dollars
+    const netAmount = amountInBaseUnit - totalFees;
+
+    if (netAmount <= 0) {
+      console.warn('Net amount is zero or negative:', { amountInBaseUnit, totalFees, netAmount });
+      return res.status(400).json({ error: 'Net amount after fees is zero or negative' });
+    }
+
+    // Update seller's wallet
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0, payoutHoldBalance: 0 };
+
+    await updateDoc(walletRef, {
+      pendingBalance: (walletData.pendingBalance || 0) + netAmount,
+      updatedAt: serverTimestamp(),
+    });
+
+    // Log sale transaction
+    const saleTransactionDoc = await addDoc(collection(db, 'transactions'), {
+      userId: sellerId,
+      type: 'Sale',
+      description: `Sale credited to pending balance for order ${orderId}`,
+      amount: netAmount,
+      date: new Date().toISOString().split('T')[0],
+      status: 'Completed',
+      createdAt: serverTimestamp(),
+      reference,
+      orderId,
+      fees: { taxFee, buyerProtectionFee, handlingFee },
+    });
+
+    // Log withdrawal-eligible transaction for admin approval
+    const withdrawalTransactionDoc = await addDoc(collection(db, 'transactions'), {
+      userId: sellerId,
+      type: 'WithdrawalEligible',
+      description: `Funds available for withdrawal from sale of order ${orderId}`,
+      amount: netAmount,
+      date: new Date().toISOString().split('T')[0],
+      status: 'Pending',
+      createdAt: serverTimestamp(),
+      reference: `withdrawal-${reference}`,
+      orderId,
+      saleTransactionId: saleTransactionDoc.id,
+    });
+
+    console.log(`Checkout processed for order ${orderId}: credited ${netAmount} to seller ${sellerId}, withdrawal transaction ${withdrawalTransactionDoc.id} logged`);
+
+    res.json({
+      status: 'success',
+      message: 'Checkout processed, seller wallet credited, withdrawal transaction logged',
+      netAmount,
+      withdrawalTransactionId: withdrawalTransactionDoc.id,
+    });
+  } catch (error) {
+    console.error('Checkout processing error:', {
+      message: error.message,
+      stack: error.stack,
+      payload: req.body,
+    });
+    res.status(500).json({
+      error: 'Failed to process checkout',
+      details: error.message,
+    });
   }
 });
 
