@@ -3,7 +3,6 @@ const express = require('express');
 const cloudinary = require('cloudinary').v2;
 const cors = require('cors');
 const multer = require('multer');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
@@ -23,9 +22,10 @@ const appFirebase = initializeApp(firebaseConfig);
 const db = getFirestore(appFirebase);
 
 // Log env vars for debugging
-console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
-console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
+console.log('DOMAIN:', process.env.DOMAIN || 'Missing');
+console.log('EMAIL_USER:', process.env.EMAIL_USER ? 'Loaded' : 'Missing');
+console.log('EMAIL_PASS:', process.env.EMAIL_PASS ? 'Loaded' : 'Missing');
 
 const app = express();
 const upload = multer({
@@ -41,9 +41,9 @@ const upload = multer({
   },
 });
 
-// Configure CORS to allow all origins for now
+// Configure CORS for production
 app.use(cors({
-  origin: '*',
+  origin: process.env.DOMAIN || 'https://foremade-frontend.onrender.com',
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type'],
 }));
@@ -55,10 +55,6 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-
-// Admin Stripe and Paystack account IDs
-const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
-const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
 
 // Nodemailer transporter
 const transporter = nodemailer.createTransport({
@@ -74,54 +70,78 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK' });
 });
 
-// /check-seller-status endpoint
-app.post('/check-seller-status', async (req, res) => {
+// Fetch banks endpoint
+app.get('/fetch-banks', async (req, res) => {
   try {
-    const { sellerId } = req.body;
-    if (!sellerId) {
-      return res.status(400).json({ error: 'Missing sellerId' });
-    }
-
-    console.log('Checking seller status for:', sellerId);
-    const sellerRef = doc(db, 'sellers', sellerId);
-    const sellerSnap = await getDoc(sellerRef);
-
-    if (!sellerSnap.exists()) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Seller not found. Please register as a seller.',
-        isRegistered: false,
-      });
-    }
-
-    const sellerData = sellerSnap.data();
-    res.json({
-      status: 'success',
-      isRegistered: true,
-      country: sellerData.country || 'Unknown',
+    console.log('Fetching banks from Paystack');
+    const response = await axios.get('https://api.paystack.co/bank?country=nigeria', {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
     });
+
+    if (!response.data.status) {
+      throw new Error('Failed to fetch banks from Paystack: ' + response.data.message);
+    }
+
+    const banks = response.data.data.map(bank => ({
+      name: bank.name,
+      code: bank.code,
+    }));
+
+    res.json(banks);
   } catch (error) {
-    console.error('Error checking seller status:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to check seller status',
-      details: error.message,
-      isRegistered: false,
-    });
+    console.error('Error fetching banks:', error);
+    res.status(500).json({ error: 'Failed to fetch banks', details: error.message });
   }
 });
 
-// /initiate-seller-payout endpoint
-app.post('/initiate-seller-payout', async (req, res) => {
+// Verify bank account endpoint
+app.post('/verify-bank-account', async (req, res) => {
   try {
-    const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
-    if (!sellerId || !amount || amount <= 0 || !transactionReference || !country || !email) {
-      return res.status(400).json({ error: 'Missing sellerId, amount, transactionReference, country, or email' });
+    const { accountNumber, bankCode } = req.body;
+    if (!accountNumber || !bankCode) {
+      return res.status(400).json({ error: 'Missing accountNumber or bankCode' });
     }
 
-    console.log('Initiating payout for:', { sellerId, amount, transactionReference, country, email });
+    console.log('Verifying bank account:', { accountNumber, bankCode });
+    const response = await axios.get(
+      `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
-    const walletRef = doc(db, 'wallets', sellerId);
+    if (!response.data.status) {
+      return res.status(400).json({ error: 'Failed to verify account', message: response.data.message });
+    }
+
+    res.json({
+      status: 'success',
+      accountName: response.data.data.account_name,
+      accountNumber: response.data.data.account_number,
+    });
+  } catch (error) {
+    console.error('Bank verification error:', error);
+    res.status(500).json({ error: 'Failed to verify bank account', details: error.response?.data?.message || error.message });
+  }
+});
+
+// Initiate payout endpoint
+app.post('/initiate-payout', async (req, res) => {
+  try {
+    const { userId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
+    if (!userId || !amount || amount <= 0 || !transactionReference || !country || !email) {
+      return res.status(400).json({ error: 'Missing required fields: userId, amount, transactionReference, country, or email' });
+    }
+
+    console.log('Initiating payout:', { userId, amount, transactionReference, country, email });
+
+    const walletRef = doc(db, 'wallets', userId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
       return res.status(400).json({ error: 'Wallet not found' });
@@ -132,26 +152,22 @@ app.post('/initiate-seller-payout', async (req, res) => {
       return res.status(400).json({ error: 'Insufficient available balance' });
     }
 
-    const sellerRef = doc(db, 'sellers', sellerId);
-    const sellerSnap = await getDoc(sellerRef);
-    if (!sellerSnap.exists()) {
-      return res.status(400).json({ error: 'Seller not found. Please register as a seller.' });
-    }
-    const seller = sellerSnap.data();
-
     if (country === 'Nigeria') {
       if (!bankCode || !accountNumber) {
         return res.status(400).json({ error: 'Missing bankCode or accountNumber for Nigeria' });
       }
 
-      let recipientCode = seller.paystackRecipientCode;
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+      let recipientCode = userSnap.exists() ? userSnap.data().paystackRecipientCode : null;
+
       if (!recipientCode) {
-        console.log('Creating Paystack recipient for seller:', sellerId);
+        console.log(`Creating Paystack recipient for user: ${userId}`);
         const recipientResponse = await axios.post(
           'https://api.paystack.co/transferrecipient',
           {
             type: 'nuban',
-            name: `Seller ${sellerId}`,
+            name: `User ${userId}`,
             account_number: accountNumber,
             bank_code: bankCode,
             currency: 'NGN',
@@ -169,7 +185,7 @@ app.post('/initiate-seller-payout', async (req, res) => {
         }
 
         recipientCode = recipientResponse.data.data.recipient_code;
-        await setDoc(sellerRef, { paystackRecipientCode: recipientCode }, { merge: true });
+        await setDoc(userRef, { paystackRecipientCode: recipientCode, email }, { merge: true });
       }
 
       const transferResponse = await axios.post(
@@ -199,12 +215,12 @@ app.post('/initiate-seller-payout', async (req, res) => {
       });
 
       const transactionDoc = await addDoc(collection(db, 'transactions'), {
-        userId: sellerId,
+        userId,
         type: 'Withdrawal',
         description: `Withdrawal for transaction ${transactionReference}`,
         amount,
         date: new Date().toISOString().split('T')[0],
-        status: 'Completed',
+        status: 'Pending', // Admin approval required
         createdAt: serverTimestamp(),
         reference: transactionReference,
         payoutReference: transferResponse.data.data.reference,
@@ -214,60 +230,56 @@ app.post('/initiate-seller-payout', async (req, res) => {
         email,
       });
 
+      // Send email notification to admin
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: process.env.ADMIN_EMAIL || 'admin@foremade.com',
+        subject: `New Withdrawal Request from User ${userId}`,
+        text: `A withdrawal request of ₦${amount} has been submitted by user ${userId} for ${country}. Transaction ID: ${transactionDoc.id}. Please review in the admin panel.`,
+      });
+
       res.json({
         status: 'success',
         transactionId: transactionDoc.id,
         reference: transferResponse.data.data.reference,
-        message: 'Withdrawal processed successfully',
+        message: 'Withdrawal request submitted successfully, awaiting admin approval',
       });
     } else if (country === 'United Kingdom') {
-      // Simulate payout to admin account since onboarding is skipped
-      if (!ADMIN_STRIPE_ACCOUNT_ID) {
-        return res.status(500).json({ error: 'Admin Stripe account ID not configured' });
-      }
-
-      const transfer = await stripe.transfers.create({
-        amount: Math.round(amount * 100),
-        currency: 'gbp',
-        destination: ADMIN_STRIPE_ACCOUNT_ID,
-        description: `Payout for transaction ${transactionReference} (seller: ${sellerId})`,
-      });
-
-      await updateDoc(walletRef, {
-        availableBalance: wallet.availableBalance - amount,
-        updatedAt: serverTimestamp(),
-      });
-
       const transactionDoc = await addDoc(collection(db, 'transactions'), {
-        userId: sellerId,
+        userId,
         type: 'Withdrawal',
-        description: `Withdrawal for transaction ${transactionReference}`,
+        description: `Manual withdrawal request for ${transactionReference}`,
         amount,
         date: new Date().toISOString().split('T')[0],
-        status: 'Completed',
+        status: 'Pending',
         createdAt: serverTimestamp(),
         reference: transactionReference,
-        transferId: transfer.id,
         country,
         email,
+      });
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: process.env.ADMIN_EMAIL || 'admin@foremade.com',
+        subject: `New UK Withdrawal Request from User ${userId}`,
+        text: `A withdrawal request of ₦${amount} has been submitted by user ${userId} for the UK. Transaction ID: ${transactionDoc.id}. Please process manually.`,
       });
 
       res.json({
         status: 'success',
         transactionId: transactionDoc.id,
-        transferId: transfer.id,
-        message: 'Withdrawal processed successfully (simulated to admin account)',
+        message: 'UK withdrawal request submitted successfully, awaiting admin approval',
       });
     } else {
       res.status(400).json({ error: 'Unsupported country' });
     }
   } catch (error) {
     console.error('Payout initiation error:', error);
-    res.status(500).json({ error: 'Failed to initiate seller payout', details: error.message });
+    res.status(500).json({ error: 'Failed to initiate payout', details: error.message });
   }
 });
 
-// /upload endpoint
+// Upload endpoint
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -305,46 +317,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// /create-payment-intent endpoint (for UK - Stripe)
-app.post('/create-payment-intent', async (req, res) => {
-  try {
-    if (!req.body) {
-      return res.status(400).json({ error: 'Request body is missing' });
-    }
-
-    const { amount, currency = 'gbp', metadata } = req.body;
-
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
-    }
-
-    if (!ADMIN_STRIPE_ACCOUNT_ID) {
-      return res.status(500).json({ error: 'Admin Stripe account ID not configured' });
-    }
-
-    const totalAmountInCents = Math.round(amount);
-    const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee + metadata.taxFee) * (currency === 'gbp' ? 100 : 1));
-    const sellerId = metadata.sellerId;
-
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: totalAmountInCents,
-      currency,
-      metadata,
-      application_fee_amount: adminFeesInCents,
-      transfer_data: {
-        destination: ADMIN_STRIPE_ACCOUNT_ID,
-      },
-      automatic_payment_methods: { enabled: true },
-    });
-
-    res.json({ clientSecret: paymentIntent.client_secret });
-  } catch (error) {
-    console.error('Payment intent error:', error);
-    res.status(500).json({ error: 'Failed to create payment intent', details: error.message });
-  }
-});
-
-// /paystack-webhook endpoint
+// Paystack webhook endpoint
 app.post('/paystack-webhook', async (req, res) => {
   try {
     const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -362,7 +335,7 @@ app.post('/paystack-webhook', async (req, res) => {
     if (event.event === 'charge.success') {
       const { reference, amount, metadata } = event.data;
       const amountInKobo = amount;
-      const sellerId = metadata.sellerId;
+      const userId = metadata.userId;
       const adminFees = metadata.adminFees || 0;
 
       const q = query(
@@ -379,7 +352,7 @@ app.post('/paystack-webhook', async (req, res) => {
       const transactionDoc = doc(db, 'transactions', querySnapshot.docs[0].id);
       const netAmount = (amountInKobo - adminFees) / 100;
 
-      const walletRef = doc(db, 'wallets', sellerId);
+      const walletRef = doc(db, 'wallets', userId);
       const walletSnap = await getDoc(walletRef);
       const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
 
@@ -394,7 +367,7 @@ app.post('/paystack-webhook', async (req, res) => {
       });
 
       await addDoc(collection(db, 'transactions'), {
-        userId: sellerId,
+        userId,
         type: 'Sale',
         description: `Sale credited to pending balance for payment ${reference}`,
         amount: netAmount,
@@ -404,7 +377,7 @@ app.post('/paystack-webhook', async (req, res) => {
         reference,
       });
 
-      console.log(`Processed charge.success for reference ${reference}: credited ${netAmount} to seller ${sellerId}`);
+      console.log(`Processed charge.success for reference ${reference}: credited ${netAmount} to user ${userId}`);
     }
 
     res.status(200).json({ status: 'success' });
@@ -414,7 +387,7 @@ app.post('/paystack-webhook', async (req, res) => {
   }
 });
 
-// /verify-paystack-payment endpoint
+// Verify Paystack payment endpoint
 app.post('/verify-paystack-payment', async (req, res) => {
   try {
     const { reference } = req.body;
@@ -453,7 +426,7 @@ app.post('/verify-paystack-payment', async (req, res) => {
   }
 });
 
-// /initiate-paystack-payment endpoint (for Nigeria - Paystack)
+// Initiate Paystack payment endpoint
 app.post('/initiate-paystack-payment', async (req, res) => {
   try {
     if (!req.body) {
@@ -469,37 +442,35 @@ app.post('/initiate-paystack-payment', async (req, res) => {
     if (!email || !/\S+@\S+\.\S+/.test(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
-    if (!metadata?.sellerId) {
-      return res.status(400).json({ error: 'Seller ID is required in metadata' });
+    if (!metadata?.userId) {
+      return res.status(400).json({ error: 'User ID is required in metadata' });
     }
     if (!process.env.PAYSTACK_SECRET_KEY) {
       return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
 
     const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0) + (metadata?.taxFee || 0);
-    const sellerId = metadata.sellerId;
+    const userId = metadata.userId;
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
     const amountInKobo = Math.round(amount);
     if (isNaN(amountInKobo) || amountInKobo <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
+      return res.status(400).json({ error: 'Invalid amount after rounding' });
     }
-
-    const payload = {
-      amount: amountInKobo,
-      email,
-      currency,
-      reference,
-      metadata: { ...metadata, adminFees },
-      channels: ['card', 'bank'],
-      callback_url: `${process.env.DOMAIN}/payment-callback`,
-    };
-
-    console.log('Paystack Payload Sent:', payload);
 
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
-      payload,
+      {
+        amount: amountInKobo,
+        email,
+        currency,
+        reference,
+        metadata: {
+          ...metadata,
+          adminFees,
+        },
+        callback_url: `${process.env.DOMAIN}/payment-callback`,
+      },
       {
         headers: {
           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
@@ -508,253 +479,63 @@ app.post('/initiate-paystack-payment', async (req, res) => {
       }
     );
 
-    console.log('Paystack API Response:', response.data);
-
-    if (response.data.status) {
-      await addDoc(collection(db, 'transactions'), {
-        userId: sellerId,
-        type: 'Sale',
-        description: `Sale initiated for payment ${reference}`,
-        amount: amountInKobo / 100,
-        adminFees: adminFees / 100,
-        date: new Date().toISOString().split('T')[0],
-        status: 'Initiated',
-        createdAt: serverTimestamp(),
-        reference,
-      });
-
-      res.json({
-        authorizationUrl: response.data.data.authorization_url,
-        reference: response.data.data.reference,
-      });
-    } else {
-      throw new Error(`Paystack error: ${response.data.message || 'Unknown error'}`);
-    }
-  } catch (error) {
-    console.error('Paystack payment error:', error.response?.data || error.message);
-    res.status(error.response?.status || 500).json({
-      error: 'Failed to initiate Paystack payment',
-      details: error.response?.data?.message || error.message,
-    });
-  }
-});
-
-// /api/create-checkout-session endpoint
-app.post('/api/create-checkout-session', async (req, res) => {
-  try {
-    if (!req.body) {
-      return res.status(400).json({ error: 'Request body is missing' });
+    if (!response.data.status) {
+      return res.status(400).json({ error: 'Failed to initiate payment', details: response.data.message });
     }
 
-    const { amount } = req.body;
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'ngn',
-            product_data: {
-              name: 'Wallet Deposit',
-            },
-            unit_amount: amount,
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      success_url: `${process.env.DOMAIN}/wallet?success=true`,
-      cancel_url: `${process.env.DOMAIN}/wallet?cancelled=true`,
-    });
-
-    res.json({ id: session.id });
-  } catch (error) {
-    console.error('Checkout session error:', error);
-    res.status(500).json({ error: 'Failed to create checkout session', details: error.message });
-  }
-});
-
-// /reject-payout endpoint
-app.post('/reject-payout', async (req, res) => {
-  try {
-    const { transactionId, sellerId } = req.body;
-    if (!transactionId || !sellerId) {
-      return res.status(400).json({ error: 'Missing transactionId or sellerId' });
-    }
-
-    const transactionRef = doc(db, 'transactions', transactionId);
-    const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists()) {
-      return res.status(400).json({ error: 'Transaction not found' });
-    }
-    const transaction = transactionSnap.data();
-
-    if (transaction.status !== 'Pending') {
-      return res.status(400).json({ error: 'Transaction is not in pending state' });
-    }
-
-    const walletRef = doc(db, 'wallets', sellerId);
-    const walletSnap = await getDoc(walletRef);
-    if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet not found' });
-    }
-    const wallet = walletSnap.data();
-
-    const amount = transaction.amount;
-
-    await updateDoc(walletRef, {
-      availableBalance: wallet.availableBalance + amount,
-      pendingBalance: wallet.pendingBalance - amount,
-      updatedAt: serverTimestamp(),
-    });
-
-    await updateDoc(transactionRef, {
-      status: 'Rejected',
-      updatedAt: serverTimestamp(),
+    await addDoc(collection(db, 'transactions'), {
+      userId,
+      type: 'Sale',
+      description: `Initiated payment for ${reference}`,
+      amount: amountInKobo / 100,
+      date: new Date().toISOString().split('T')[0],
+      status: 'Initiated',
+      createdAt: serverTimestamp(),
+      reference,
     });
 
     res.json({
       status: 'success',
-      message: 'Payout rejected and funds returned to available balance',
+      authorization_url: response.data.data.authorization_url,
+      access_code: response.data.data.access_code,
+      reference,
     });
   } catch (error) {
-    console.error('Payout rejection error:', error);
-    res.status(500).json({ error: 'Failed to reject payout', details: error.message });
+    console.error('Paystack payment initiation error:', error);
+    res.status(500).json({ error: 'Failed to initiate payment', details: error.response?.data?.message || error.message });
   }
 });
 
-// /verify-bank-account endpoint
-app.post('/verify-bank-account', async (req, res) => {
-  try {
-    const { accountNumber, bankCode } = req.body;
-    if (!accountNumber || !bankCode) {
-      return res.status(400).json({ error: 'Missing accountNumber or bankCode' });
-    }
-
-    console.log('Verifying account with PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Key is set' : 'Key is NOT set');
-    console.log('Request URL:', `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`);
-
-    const response = await axios.get(
-      `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    console.log('Paystack Response Status:', response.status);
-    console.log('Paystack Response Data:', response.data);
-
-    if (response.data.status) {
-      res.json({
-        status: 'success',
-        accountName: response.data.data.account_name,
-      });
-    } else {
-      res.status(400).json({ error: 'Could not verify account', message: response.data.message });
-    }
-  } catch (error) {
-    console.error('Bank verification error:', error);
-    res.status(500).json({
-      error: 'Failed to verify bank account',
-      details: error.response?.data?.message || error.message,
-    });
-  }
-});
-
-// /fetch-banks endpoint
-app.get('/fetch-banks', async (req, res) => {
-  try {
-    console.log('Fetching banks with PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Key is set' : 'Key is NOT set');
-    const response = await axios.get('https://api.paystack.co/bank', {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    console.log('Paystack Bank Fetch Response Status:', response.status);
-    console.log('Paystack Bank Fetch Data:', response.data);
-
-    if (response.data.status) {
-      res.json(response.data.data);
-    } else {
-      throw new Error('Failed to fetch banks');
-    }
-  } catch (error) {
-    console.error('Fetch banks error:', error);
-    res.status(500).json({ error: 'Failed to fetch banks', details: error.response?.data?.message || error.message });
-  }
-});
-
-// /verify-recaptcha endpoint
-app.post('/verify-recaptcha', async (req, res) => {
-  console.log('reCAPTCHA request:', req.body);
-  const { token } = req.body;
-  if (!token) {
-    console.error('No reCAPTCHA token provided');
-    return res.status(400).json({ success: false, error: 'No reCAPTCHA token provided' });
-  }
-  if (!process.env.RECAPTCHA_SECRET_KEY) {
-    console.error('RECAPTCHA_SECRET_KEY missing');
-    return res.status(500).json({ success: false, error: 'Server configuration error' });
-  }
-  try {
-    const response = await axios.post(
-      'https://www.google.com/recaptcha/api/siteverify',
-      new URLSearchParams({
-        secret: process.env.RECAPTCHA_SECRET_KEY,
-        response: token,
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-    console.log('Google response:', response.data);
-    if (response.data.success) {
-      return res.json({ success: true, score: response.data.score });
-    }
-    return res.status(400).json({ success: false, error: 'reCAPTCHA verification failed', details: response.data['error-codes'] || [] });
-  } catch (error) {
-    console.error('reCAPTCHA error:', error.message, error.response?.data);
-    return res.status(500).json({ success: false, error: 'Server error', details: error.message });
-  }
-});
-
-// /send-product-approved-email endpoint
+// Send product approved email endpoint
 app.post('/send-product-approved-email', async (req, res) => {
   try {
-    const { productId, productName, sellerId, sellerEmail } = req.body;
-    console.log('Received payload for product approved email:', { productId, productName, sellerId, sellerEmail });
+    const { productId, productName, userId, email } = req.body;
+    console.log('Received payload for product approved email:', { productId, productName, userId, email });
 
-    if (!productId || !productName || !sellerId) {
-      console.warn('Missing required fields:', { productId, productName, sellerId, sellerEmail });
-      return res.status(400).json({ error: 'Missing productId, productName, or sellerId' });
+    if (!productId || !productName || !userId) {
+      console.warn('Missing required fields:', { productId, productName, userId, email });
+      return res.status(400).json({ error: 'Missing productId, productName, or userId' });
     }
 
-    let email = sellerEmail;
-    if (!email) {
-      const userDoc = await getDoc(doc(db, 'users', sellerId));
+    let userEmail = email;
+    if (!userEmail) {
+      const userDoc = await getDoc(doc(db, 'users', userId));
       if (!userDoc.exists()) {
-        console.warn(`Seller ${sellerId} not found in Firestore`);
-        return res.status(400).json({ error: 'Seller not found' });
+        console.warn(`User ${userId} not found in Firestore`);
+        return res.status(400).json({ error: 'User not found' });
       }
-      email = userDoc.data().email;
-      if (!email) {
-        console.warn(`No email found for seller ${sellerId}`);
-        return res.status(400).json({ error: 'No email found for seller' });
+      userEmail = userDoc.data().email;
+      if (!userEmail) {
+        console.warn(`No email found for user ${userId}`);
+        return res.status(400).json({ error: 'No email found for user' });
       }
     }
 
-    if (!/\S+@\S+\.\S+/.test(email)) {
-      console.warn('Invalid email format:', email);
+    if (!/\S+@\S+\.\S+/.test(userEmail)) {
+      console.warn('Invalid email format:', userEmail);
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Verify product exists
     const productRef = doc(db, 'products', productId);
     const productSnap = await getDoc(productRef);
     if (!productSnap.exists()) {
@@ -764,74 +545,68 @@ app.post('/send-product-approved-email', async (req, res) => {
 
     const mailOptions = {
       from: `"Your Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
-      to: email,
+      to: userEmail,
       subject: 'Your Product is Live on Foremade! 🎉',
-      text: `Great news! Your product "${productName}" (ID: ${productId}) has been approved and is now live on Foremade. Log in to your seller dashboard to manage your listings: ${process.env.DOMAIN}/seller-dashboard`,
+      text: `Great news! Your product "${productName}" (ID: ${productId}) has been approved and is now live on Foremade. Log in to your dashboard to manage your listings: ${process.env.DOMAIN}/seller-dashboard`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #1a73e8;">Great news! Your Product is Live! 🎉</h2>
-          <p>We’re excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Foremade!</p>
-          <p>Customers can now view and purchase your product on our platform. To manage your listings or view performance, visit your seller dashboard:</p>
-          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
-          <p>Thank you for choosing Foremade. Let’s make those sales soar!</p>
+          <h2 style="color: #1a73e8;">Great News! Your Product is Live! 🎉</h2>
+          <p>Your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved and is now live on Foremade!</p>
+          <p>Customers can now view and purchase your product. Manage your listings via your dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Dashboard</a>
+          <p>Thank you for choosing Foremade!</p>
           <p>Best regards,<br>The Foremade Team</p>
           <hr style="border-top: 1px solid #eee;">
-          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@foremade.com">support@foremade.com</a>.</p>
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. Contact <a href="mailto:support@foremade.com">support@foremade.com</a> for assistance.</p>
         </div>
       `,
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`Approval email sent to ${email} for product ${productId}`);
+    console.log(`Approval email sent to ${userEmail} for product ${productId}`);
 
-    // Update product status in Firestore
     await updateDoc(productRef, {
       status: 'approved',
       updatedAt: serverTimestamp(),
     });
 
-    res.json({ status: 'success', message: 'Approval email sent to seller' });
+    res.json({ status: 'success', message: 'Approval email sent to user' });
   } catch (error) {
-    console.error('Error sending product approved email:', {
-      message: error.message,
-      stack: error.stack,
-      payload: req.body,
-    });
+    console.error('Error sending product approved email:', error);
     res.status(500).json({ error: 'Failed to send approval email', details: error.message });
   }
 });
 
-// /send-product-rejected-email endpoint
+// Send product rejected email endpoint
 app.post('/send-product-rejected-email', async (req, res) => {
   try {
-    const { productId, productName, sellerId, sellerEmail, reason } = req.body;
-    console.log('Received payload for product rejected email:', { productId, productName, sellerId, sellerEmail, reason });
+    const { productId, productName, userId, email, reason } = req.body;
+    console.log('Received payload for product rejected email:', { productId, productName, userId, email, reason });
 
-    if (!productId || !productName || !sellerId || !reason) {
-      console.warn('Missing required fields:', { productId, productName, sellerId, sellerEmail, reason });
-      return res.status(400).json({ error: 'Missing productId, productName, sellerId, or reason' });
+    if (!productId || !productName || !userId || !reason) {
+      console.warn('Missing required fields:', { productId, productName, userId, email, reason });
+      return res.status(400).json({ error: 'Missing productId, productName, userId, or reason' });
     }
 
-    let email = sellerEmail;
-    if (!email) {
-      const userDoc = await getDoc(doc(db, 'users', sellerId));
+    let userEmail = email;
+    if (!userEmail) {
+      const userDoc = await getDoc(doc(db, 'users', userId));
       if (!userDoc.exists()) {
-        console.warn(`Seller ${sellerId} not found in Firestore`);
-        return res.status(400).json({ error: 'Seller not found' });
+        console.warn(`User ${userId} not found in Firestore`);
+        return res.status(400).json({ error: 'User not found' });
       }
-      email = userDoc.data().email;
-      if (!email) {
-        console.warn(`No email found for seller ${sellerId}`);
-        return res.status(400).json({ error: 'No email found for seller' });
+      userEmail = userDoc.data().email;
+      if (!userEmail) {
+        console.warn(`No email found for user ${userId}`);
+        return res.status(400).json({ error: 'No email found for user' });
       }
     }
 
-    if (!/\S+@\S+\.\S+/.test(email)) {
-      console.warn('Invalid email format:', email);
+    if (!/\S+@\S+\.\S+/.test(userEmail)) {
+      console.warn('Invalid email format:', userEmail);
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Verify product exists
     const productRef = doc(db, 'products', productId);
     const productSnap = await getDoc(productRef);
     if (!productSnap.exists()) {
@@ -841,19 +616,18 @@ app.post('/send-product-rejected-email', async (req, res) => {
 
     const mailOptions = {
       from: `"Your Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
-      to: email,
+      to: userEmail,
       subject: 'Update: Your Product Was Not Approved on Foremade',
-      text: `Dear Seller, we're sorry to inform you that your product "${productName}" (ID: ${productId}) was not approved for listing on Foremade. Reason: ${reason}. Please review our guidelines and resubmit or contact support for more details: https://foremade.com/support. Log in to your seller dashboard to update your product: ${process.env.DOMAIN}/seller-dashboard`,
+      text: `Dear User, your product "${productName}" (ID: ${productId}) was not approved for listing on Foremade. Reason: ${reason}. Please review our guidelines and resubmit: ${process.env.DOMAIN}/seller-dashboard`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
-          <p>Dear Seller,</p>
-          <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Foremade after our team’s review.</p>
-          <p><strong>Reason for Rejection:</strong> ${reason}</p>
-          <p>Please review our <a href="https://foremade.com/guidelines" style="color: #1;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
-          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
-          <p>For further assistance, contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
-          <p>Thank you for being part of Foremade!</p>
+          <p>Dear User,</p>
+          <p>Your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Foremade.</p>
+          <p><strong>Reason:</strong> ${reason}</p>
+          <p>Please review our <a href="https://foremade.com/guidelines" style="color: #1a73e8;">guidelines</a> and update your product in the dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Dashboard</a>
+          <p>Contact <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a> for assistance.</p>
           <p>Best regards,<br>The Foremade Team</p>
           <hr style="border-top: 1px solid #eee;">
           <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
@@ -862,74 +636,52 @@ app.post('/send-product-rejected-email', async (req, res) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`Rejection email sent to ${email} for product ${productId}`);
+    console.log(`Rejection email sent to ${userEmail} for product ${productId}`);
 
-    // Update product status in Firestore
     await updateDoc(productRef, {
       status: 'rejected',
       rejectionReason: reason,
       updatedAt: serverTimestamp(),
     });
 
-    res.json({ status: 'success', message: 'Rejection email sent to seller' });
+    res.json({ status: 'success', message: 'Rejection email sent to user' });
   } catch (error) {
-    console.error('Error sending product rejected email:', {
-      message: error.message,
-      stack: error.stack,
-      payload: req.body,
-    });
+    console.error('Error sending product rejected email:', error);
     res.status(500).json({ error: 'Failed to send rejection email', details: error.message });
   }
 });
 
-// /send-order-confirmation endpoint
+// Send order confirmation endpoint
 app.post('/send-order-confirmation', async (req, res) => {
   try {
     const { orderId, email, items, total, currency } = req.body;
-    console.log('Received payload for order confirmation:', {
-      orderId,
-      email,
-      items,
-      total,
-      currency,
-      payload: JSON.stringify(req.body, null, 2),
-    });
+    console.log('Received payload for order confirmation:', { orderId, email, items, total, currency });
 
-    // Validate payload
     if (!orderId || !email || !items || !total) {
-      console.warn('Missing required fields:', { orderId, email, items, total });
       return res.status(400).json({ error: 'Missing required fields' });
     }
     if (!/\S+@\S+\.\S+/.test(email)) {
-      console.warn('Invalid email format:', email);
       return res.status(400).json({ error: 'Invalid email format' });
     }
     if (!Array.isArray(items) || items.length === 0) {
-      console.warn('Invalid items array:', items);
       return res.status(400).json({ error: 'Items must be a non-empty array' });
     }
     if (typeof total !== 'number' || total <= 0) {
-      console.warn('Invalid total amount:', total);
       return res.status(400).json({ error: 'Total must be a positive number' });
     }
     if (!['ngn', 'gbp'].includes(currency?.toLowerCase())) {
-      console.warn('Invalid currency:', currency);
       return res.status(400).json({ error: 'Invalid currency' });
     }
 
-    // Validate items structure
     for (const item of items) {
       if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
-        console.warn('Invalid item structure:', item);
-        return res.status(400).json({ error: 'Invalid item structure: missing name, quantity, price, or imageUrls' });
+        return res.status(400).json({ error: 'Invalid item structure' });
       }
     }
 
-    // Verify order exists in Firebase
     const orderRef = doc(db, 'orders', orderId);
     const orderSnap = await getDoc(orderRef);
     if (!orderSnap.exists()) {
-      console.warn(`Order ${orderId} not found in Firestore`);
       return res.status(404).json({ error: 'Order not found' });
     }
 
@@ -938,12 +690,8 @@ app.post('/send-order-confirmation', async (req, res) => {
         <td style="padding: 10px;">
           <img src="${item.imageUrls[0] || 'https://via.placeholder.com/50'}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />
         </td>
-        <td style="padding: 10px;">
-          ${item.name}
-        </td>
-        <td style="padding: 10px; text-align: center;">
-          ${item.quantity}
-        </td>
+        <td style="padding: 10px;">${item.name}</td>
+        <td style="padding: 10px; text-align: center;">${item.quantity}</td>
         <td style="padding: 10px; text-align: right;">
           ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${(item.price * item.quantity).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
         </td>
@@ -954,11 +702,11 @@ app.post('/send-order-confirmation', async (req, res) => {
       from: `"Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
       to: email,
       subject: `Order Confirmation - #${orderId}`,
-      text: `Thank you for your purchase on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
+      text: `Thank you for your purchase! Your order #${orderId} is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View details: ${process.env.DOMAIN}/order-confirmation?orderId=${orderId}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #1a73e8;">Thank You for Your Order! 🛒</h2>
-          <p>Your order <strong>#${orderId}</strong> has been successfully placed with Foremade and is now being processed.</p>
+          <p>Your order <strong>#${orderId}</strong> has been placed and is being processed.</p>
           <h3 style="color: #333;">Order Details</h3>
           <table style="width: 100%; border-collapse: collapse;">
             <thead>
@@ -982,10 +730,9 @@ app.post('/send-order-confirmation', async (req, res) => {
             </tfoot>
           </table>
           <p style="margin-top: 20px;">
-            You can view your order details and track its progress here:
-            <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="color: #1a73e8;">View Order</a>
+            View your order details: <a href="${process.env.DOMAIN}/order-confirmation?orderId=${orderId}" style="color: #1a73e8;">View Order</a>
           </p>
-          <p>Questions? Contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
+          <p>Contact <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a> for assistance.</p>
           <p>Thank you for shopping with Foremade!</p>
           <p>Best regards,<br>The Foremade Team</p>
           <hr style="border-top: 1px solid #eee;">
@@ -998,11 +745,7 @@ app.post('/send-order-confirmation', async (req, res) => {
     console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
     res.json({ status: 'success', message: 'Order confirmation email sent' });
   } catch (error) {
-    console.error('Error sending order confirmation email:', {
-      message: error.message,
-      stack: error.stack,
-      payload: JSON.stringify(req.body, null, 2),
-    });
+    console.error('Error sending order confirmation email:', error);
     res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
   }
 });
