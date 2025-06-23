@@ -509,6 +509,57 @@ app.post('/initiate-seller-payout', async (req, res) => {
   }
 });
 
+// /initiate-payout endpoint (Added to fix 404 error)
+app.post('/initiate-payout', async (req, res) => {
+  try {
+    const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
+    if (!sellerId || !amount || amount <= 0 || !transactionReference) {
+      return res.status(400).json({ error: 'Missing sellerId, amount, or transactionReference' });
+    }
+
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    if (!walletSnap.exists()) {
+      return res.status(400).json({ error: 'Wallet not found' });
+    }
+    const wallet = walletSnap.data();
+
+    if (wallet.availableBalance < amount) {
+      return res.status(400).json({ error: 'Insufficient available balance' });
+    }
+
+    await updateDoc(walletRef, {
+      availableBalance: wallet.availableBalance - amount,
+      pendingBalance: (wallet.pendingBalance || 0) + amount,
+      updatedAt: serverTimestamp(),
+    });
+
+    const transactionDoc = await addDoc(collection(db, 'transactions'), {
+      userId: sellerId,
+      type: 'Withdrawal',
+      description: `Withdrawal request for transaction ${transactionReference} - Awaiting Admin Approval`,
+      amount,
+      date: new Date().toISOString().split('T')[0],
+      status: 'Pending',
+      createdAt: serverTimestamp(),
+      reference: transactionReference,
+      bankCode: country === 'Nigeria' ? bankCode : undefined,
+      accountNumber: country === 'Nigeria' ? accountNumber : undefined,
+      country,
+      email,
+    });
+
+    res.json({
+      status: 'success',
+      transactionId: transactionDoc.id,
+      message: 'Withdrawal request submitted, awaiting admin approval',
+    });
+  } catch (error) {
+    console.error('Payout initiation error:', error);
+    res.status(500).json({ error: 'Failed to initiate payout', details: error.message });
+  }
+});
+
 // /approve-payout endpoint
 app.post('/approve-payout', async (req, res) => {
   try {
@@ -669,7 +720,7 @@ app.post('/reject-payout', async (req, res) => {
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet won’t found' });
+      return res.status(400).json({ error: 'Wallet not found' });
     }
     const wallet = walletSnap.data();
 
@@ -842,7 +893,7 @@ app.post('/send-product-approved-email', async (req, res) => {
           <h2 style="color: #1a73e8;">Great news! Your Product is Live! 🎉</h2>
           <p>We’re excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Foremade!</p>
           <p>Customers can now view and purchase your product on our platform. To manage your listings or view performance, visit your seller dashboard:</p>
-          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius:; border-radius: 5px;">Go to Seller Dashboard</a>
           <p>Thank you for choosing Foremade. Let’s make those sales soar!</p>
           <p>Best regards,<br>The Foremade Team</p>
           <hr style="border-top: 1px solid #eee;">
