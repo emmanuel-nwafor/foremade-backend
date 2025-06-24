@@ -354,10 +354,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
     }
 
     const { amount } = req.body;
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      console.error('Invalid amount:', amount);
+      return res.status(400).json({ error: 'Invalid amount: must be a positive number' });
     }
-
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -401,7 +401,7 @@ app.post('/onboard-seller', async (req, res) => {
         'https://api.paystack.co/transferrecipient',
         {
           type: 'nuban',
-          name: `Seller ${userId}`,
+          name: `User ${userId}`,
           account_number: accountNumber,
           bank_code: bankCode,
           currency: 'NGN',
@@ -418,8 +418,15 @@ app.post('/onboard-seller', async (req, res) => {
         throw new Error('Failed to create Paystack transfer recipient');
       }
 
-      const sellerRef = doc(db, 'sellers', userId);
-      await setDoc(sellerRef, { paystackRecipientCode: recipientResponse.data.data.recipient_code, country, createdAt: serverTimestamp() });
+      const userRef = doc(db, 'users', userId);
+      await setDoc(userRef, { 
+        paystackRecipientCode: recipientResponse.data.data.recipient_code, 
+        bankCode,
+        accountNumber,
+        country, 
+        createdAt: serverTimestamp(),
+        isSeller: true
+      }, { merge: true });
 
       res.json({
         recipientCode: recipientResponse.data.data.recipient_code,
@@ -442,8 +449,13 @@ app.post('/onboard-seller', async (req, res) => {
         type: 'account_onboarding',
       });
 
-      const sellerRef = doc(db, 'sellers', userId);
-      await setDoc(sellerRef, { stripeAccountId: account.id, country, createdAt: serverTimestamp() });
+      const userRef = doc(db, 'users', userId);
+      await setDoc(userRef, { 
+        stripeAccountId: account.id, 
+        country, 
+        createdAt: serverTimestamp(),
+        isSeller: true
+      }, { merge: true });
 
       res.json({
         stripeAccountId: account.id,
@@ -454,7 +466,7 @@ app.post('/onboard-seller', async (req, res) => {
     }
   } catch (error) {
     console.error('Onboarding error:', error);
-    res.status(500).json({ error: 'Failed to onboard seller', details: error.message });
+    res.status(500).json({ error: 'Failed to onboard user', details: error.message });
   }
 });
 
@@ -622,25 +634,19 @@ app.post('/approve-payout', async (req, res) => {
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
-      console.error(`Wallet not found for sellerId: ${sellerId}`);
+      console.error(`Wallet not found for userId: ${sellerId}`);
       return res.status(400).json({ error: 'Wallet not found' });
     }
     const wallet = walletSnap.data();
     console.log('Wallet data:', wallet);
 
-    const sellerRef = doc(db, 'sellers', sellerId);
-    const sellerSnap = await getDoc(sellerRef);
-    if (!sellerSnap.exists()) {
-      console.error(`Seller not found: ${sellerId}`);
-      return res.status(400).json({ error: 'Seller not found' });
+    const userRef = doc(db, 'users', sellerId);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      console.error(`User not found: ${sellerId}`);
+      return res.status(400).json({ error: 'User not found' });
     }
-    const seller = sellerSnap.data();
-    console.log('Seller data:', seller);
-
-    if (!seller.paystackRecipientCode && transaction.country === 'Nigeria') {
-      console.error(`No Paystack recipient code for seller: ${sellerId}`);
-      return res.status(400).json({ error: 'Seller has not set up bank details' });
-    }
+    console.log('User data:', userSnap.data());
 
     const amount = transaction.amount;
 
@@ -747,13 +753,13 @@ app.post('/verify-bank-account', async (req, res) => {
     console.log('Paystack Response:', response.data);
 
     if (response.data.status) {
-      // Save bank details to sellers collection
-      const sellerRef = doc(db, 'sellers', userId);
+      // Save bank details to users collection
+      const userRef = doc(db, 'users', userId);
       const recipientResponse = await axios.post(
         'https://api.paystack.co/transferrecipient',
         {
           type: 'nuban',
-          name: `Seller ${userId}`,
+          name: `User ${userId}`,
           account_number: accountNumber,
           bank_code: bankCode,
           currency: 'NGN',
@@ -770,12 +776,13 @@ app.post('/verify-bank-account', async (req, res) => {
         throw new Error('Failed to create Paystack transfer recipient');
       }
 
-      await setDoc(sellerRef, {
+      await setDoc(userRef, {
         paystackRecipientCode: recipientResponse.data.data.recipient_code,
         bankCode,
         accountNumber,
         country: 'Nigeria',
         updatedAt: serverTimestamp(),
+        isSeller: true
       }, { merge: true });
 
       res.json({
@@ -783,7 +790,7 @@ app.post('/verify-bank-account', async (req, res) => {
         accountName: response.data.data.account_name,
         recipientCode: recipientResponse.data.data.recipient_code,
       });
-    }  else {
+    } else {
       res.status(400).json({ error: 'Failed to verify account', details: response.data.message });
     }
   } catch (error) {
@@ -867,13 +874,13 @@ app.post('/send-product-approved-email', async (req, res) => {
     if (!email) {
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
-        console.warn(`Seller ${sellerId} not found in Firestore`);
-        return res.status(400).json({ error: 'Seller not found' });
+        console.warn(`User ${sellerId} not found in Firestore`);
+        return res.status(400).json({ error: 'User not found' });
       }
       email = userDoc.data().email;
       if (!email) {
-        console.warn(`No email found for seller ${sellerId}`);
-        return res.status(400).json({ error: 'No email found for seller' });
+        console.warn(`No email found for user ${sellerId}`);
+        return res.status(400).json({ error: 'No email found for user' });
       }
     }
 
@@ -918,7 +925,7 @@ app.post('/send-product-approved-email', async (req, res) => {
       updatedAt: serverTimestamp(),
     });
 
-    res.json({ status: 'success', message: 'Approval email sent to seller' });
+    res.json({ status: 'success', message: 'Approval email sent to user' });
   } catch (error) {
     console.error('Error sending product approved email:', {
       message: error.message,
@@ -944,13 +951,13 @@ app.post('/send-product-rejected-email', async (req, res) => {
     if (!email) {
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
-        console.warn(`Seller ${sellerId} not found in Firestore`);
-        return res.status(400).json({ error: 'Seller not found' });
+        console.warn(`User ${sellerId} not found in Firestore`);
+        return res.status(400).json({ error: 'User not found' });
       }
       email = userDoc.data().email;
       if (!email) {
-        console.warn(`No email found for seller ${sellerId}`);
-        return res.status(400).json({ error: 'No email found for seller' });
+        console.warn(`No email found for user ${sellerId}`);
+        return res.status(400).json({ error: 'No email found for user' });
       }
     }
 
@@ -971,11 +978,11 @@ app.post('/send-product-rejected-email', async (req, res) => {
       from: `"Your Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
       to: email,
       subject: 'Update: Your Product Was Not Approved on Foremade',
-      text: `Dear Seller, we're sorry to inform you that your product "${productName}" (ID: ${productId}) was not approved for listing on Foremade. Reason: ${reason}. Please review our guidelines and resubmit or contact support for more details: https://foremade.com/support. Log in to your seller dashboard to update your product: ${process.env.DOMAIN}/seller-dashboard`,
+      text: `Dear User, we're sorry to inform you that your product "${productName}" (ID: ${productId}) was not approved for listing on Foremade. Reason: ${reason}. Please review our guidelines and resubmit or contact support for more details: https://foremade.com/support. Log in to your seller dashboard to update your product: ${process.env.DOMAIN}/seller-dashboard`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
-          <p>Dear Seller,</p>
+          <p>Dear User,</p>
           <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Foremade after our team’s review.</p>
           <p><strong>Reason for Rejection:</strong> ${reason}</p>
           <p>Please review our <a href="https://foremade.com/guidelines" style="color: #1a73e;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your preferred method:</p>
@@ -999,7 +1006,7 @@ app.post('/send-product-rejected-email', async (req, res) => {
       updatedAt: serverTimestamp(),
     });
 
-    res.json({ status: 'success', message: 'Rejection email sent to seller' });
+    res.json({ status: 'success', message: 'Rejection email sent to user' });
   } catch (error) {
     console.error('Error sending product rejected email:', {
       message: error.message,
@@ -1083,7 +1090,7 @@ app.post('/send-order-confirmation', async (req, res) => {
       subject: `Sale Confirmation - #${orderId}`,
       text: `Thank you for your order on Foremade! Your order #${orderId} has been received and is being processed. Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. View your order details: ${process.env.DOMAIN}/order-confirmation?order_id=${orderId}`,
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: margin auto; padding: 20px;">
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #1a73e8;">Thank You for Your Order! 🛒</h2>
           <p>Your order <strong>#${orderId}</strong> has been successfully placed with Foremade. We’re processing it now and will notify you with updates.</p>
           <h3>Order Summary</h3>
