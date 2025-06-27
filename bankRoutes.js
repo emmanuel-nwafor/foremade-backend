@@ -1,72 +1,8 @@
 const express = require('express');
-const router = express.Router();
-const { db } = require('../config/firebase');
-const { upload } = require('../middleware/upload');
-const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
 const axios = require('axios');
-const crypto = require('crypto');
-const nodemailer = require('nodemailer');
+const router = express.Router();
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-// /initiate-seller-payout
-router.post('/initiate-seller-payout', async (req, res) => {
-  try {
-    const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
-    if (!sellerId || !amount || amount <= 0 || !transactionReference) {
-      return res.status(400).json({ error: 'Missing sellerId, amount, or transactionReference' });
-    }
-
-    const walletRef = doc(db, 'wallets', sellerId);
-    const walletSnap = await getDoc(walletRef);
-    if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet not found' });
-    }
-    const wallet = walletSnap.data();
-
-    if (wallet.availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient available balance' });
-    }
-
-    await updateDoc(walletRef, {
-      availableBalance: wallet.availableBalance - amount,
-      pendingBalance: (wallet.pendingBalance || 0) + amount,
-      updatedAt: serverTimestamp(),
-    });
-
-    const transactionDoc = await addDoc(collection(db, 'transactions'), {
-      userId: sellerId,
-      type: 'Withdrawal',
-      description: `Withdrawal request for transaction ${transactionReference} - Awaiting Admin Approval`,
-      amount,
-      date: new Date().toISOString().split('T')[0],
-      status: 'Pending',
-      createdAt: serverTimestamp(),
-      reference: transactionReference,
-      bankCode: country === 'Nigeria' ? bankCode : undefined,
-      accountNumber: country === 'Nigeria' ? accountNumber : undefined,
-      country,
-      email,
-    });
-
-    res.json({
-      status: 'success',
-      transactionId: transactionDoc.id,
-      message: 'Withdrawal request submitted, awaiting admin approval',
-    });
-  } catch (error) {
-    console.error('Payout initiation error:', error);
-    res.status(500).json({ error: 'Failed to initiate seller payout', details: error.message });
-  }
-});
-
-// /verify-bank-account
+// /verify-bank-account endpoint
 router.post('/verify-bank-account', async (req, res) => {
   try {
     const { accountNumber, bankCode } = req.body;
@@ -107,7 +43,7 @@ router.post('/verify-bank-account', async (req, res) => {
   }
 });
 
-// /fetch-banks
+// /fetch-banks endpoint
 router.get('/fetch-banks', async (req, res) => {
   try {
     console.log('Fetching banks with PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Key is set' : 'Key is NOT set');

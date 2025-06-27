@@ -1,14 +1,19 @@
 const express = require('express');
-const router = express.Router();
-const { db } = require('../config/firebase');
-const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
+const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const crypto = require('crypto');
+const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
+const router = express.Router();
 
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 
-// /create-payment-intent
+// Log env vars for debugging
+console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
+console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
+console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
+
+// /create-payment-intent endpoint (for UK - Stripe)
 router.post('/create-payment-intent', async (req, res) => {
   try {
     if (!req.body) {
@@ -27,7 +32,6 @@ router.post('/create-payment-intent', async (req, res) => {
 
     const totalAmountInCents = Math.round(amount);
     const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee + metadata.taxFee) * (currency === 'gbp' ? 100 : 1));
-    const sellerId = metadata.sellerId;
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalAmountInCents,
@@ -47,7 +51,7 @@ router.post('/create-payment-intent', async (req, res) => {
   }
 });
 
-// /paystack-webhook
+// /paystack-webhook endpoint
 router.post('/paystack-webhook', async (req, res) => {
   try {
     const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -117,7 +121,7 @@ router.post('/paystack-webhook', async (req, res) => {
   }
 });
 
-// /verify-paystack-payment
+// /verify-paystack-payment endpoint
 router.post('/verify-paystack-payment', async (req, res) => {
   try {
     const { reference } = req.body;
@@ -156,7 +160,7 @@ router.post('/verify-paystack-payment', async (req, res) => {
   }
 });
 
-// /initiate-paystack-payment
+// /initiate-paystack-payment endpoint (for Nigeria - Paystack)
 router.post('/initiate-paystack-payment', async (req, res) => {
   try {
     if (!req.body) {
@@ -242,8 +246,8 @@ router.post('/initiate-paystack-payment', async (req, res) => {
   }
 });
 
-// /api/create-checkout-session
-router.post('/api/create-checkout-session', async (req, res) => {
+// /create-checkout-session endpoint
+router.post('/create-checkout-session', async (req, res) => {
   try {
     if (!req.body) {
       return res.status(400).json({ error: 'Request body is missing' });
