@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 const router = express.Router();
 
+const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
+
 // Log env vars for debugging
 console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
@@ -19,21 +21,26 @@ router.post('/create-payment-intent', async (req, res) => {
     }
 
     const { amount, currency = 'gbp', metadata } = req.body;
-    if (!amount || amount <= 0 || !metadata.sellerId) {
-      return res.status(400).json({ error: 'Invalid amount or missing sellerId' });
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
     }
 
-    const adminBankRef = doc(db, 'admin', 'bank');
-    const adminBankSnap = await getDoc(adminBankRef);
-    if (!adminBankSnap.exists() || adminBankSnap.data().country !== 'United Kingdom') {
-      return res.status(500).json({ error: 'Admin bank not configured for UK' });
+    if (!ADMIN_STRIPE_ACCOUNT_ID) {
+      return res.status(500).json({ error: 'Admin Stripe account ID not configured' });
     }
 
     const totalAmountInCents = Math.round(amount);
+    const adminFeesInCents = Math.round((metadata.handlingFee + metadata.buyerProtectionFee + metadata.taxFee) * (currency === 'gbp' ? 100 : 1));
+
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalAmountInCents,
       currency,
       metadata,
+      application_fee_amount: adminFeesInCents,
+      transfer_data: {
+        destination: ADMIN_STRIPE_ACCOUNT_ID,
+      },
       automatic_payment_methods: { enabled: true },
     });
 
@@ -63,7 +70,7 @@ router.post('/paystack-webhook', async (req, res) => {
       const { reference, amount, metadata } = event.data;
       const amountInKobo = amount;
       const sellerId = metadata.sellerId;
-      const adminFees = (metadata.handlingFee || 0) + (metadata.buyerProtectionFee || 0) + (metadata.taxFee || 0);
+      const adminFees = metadata.adminFees || 0;
 
       const q = query(
         collection(db, 'transactions'),
@@ -83,35 +90,6 @@ router.post('/paystack-webhook', async (req, res) => {
       const walletSnap = await getDoc(walletRef);
       const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
 
-      const adminBankRef = doc(db, 'admin', 'bank');
-      const adminBankSnap = await getDoc(adminBankRef);
-      if (!adminBankSnap.exists()) {
-        throw new Error('Admin bank not configured');
-      }
-      const adminBank = adminBankSnap.data();
-
-      // Transfer fees to admin's bank
-      const adminTransfer = await axios.post(
-        'https://api.paystack.co/transfer',
-        {
-          source: 'balance',
-          amount: adminFees,
-          recipient: await createRecipient(adminBank.bankCode, adminBank.accountNumber, 'Admin Fees'),
-          reason: `Admin fees for transaction ${reference}`,
-          currency: 'NGN',
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!adminTransfer.data.status) {
-        throw new Error('Failed to transfer admin fees');
-      }
-
       await updateDoc(walletRef, {
         pendingBalance: (walletData.pendingBalance || 0) + netAmount,
         updatedAt: serverTimestamp(),
@@ -120,7 +98,6 @@ router.post('/paystack-webhook', async (req, res) => {
       await updateDoc(transactionDoc, {
         status: 'Completed',
         updatedAt: serverTimestamp(),
-        adminTransferReference: adminTransfer.data.data.reference,
       });
 
       await addDoc(collection(db, 'transactions'), {
@@ -143,30 +120,6 @@ router.post('/paystack-webhook', async (req, res) => {
     res.status(500).json({ error: 'Failed to process webhook', details: error.message });
   }
 });
-
-// Helper function to create Paystack recipient
-async function createRecipient(bankCode, accountNumber, name) {
-  const response = await axios.post(
-    'https://api.paystack.co/transferrecipient',
-    {
-      type: 'nuban',
-      name,
-      account_number: accountNumber,
-      bank_code: bankCode,
-      currency: 'NGN',
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
-  if (!response.data.status) {
-    throw new Error('Failed to create transfer recipient');
-  }
-  return response.data.data.recipient_code;
-}
 
 // /verify-paystack-payment endpoint
 router.post('/verify-paystack-payment', async (req, res) => {
@@ -328,37 +281,6 @@ router.post('/create-checkout-session', async (req, res) => {
   } catch (error) {
     console.error('Checkout session error:', error);
     res.status(500).json({ error: 'Failed to create checkout session', details: error.message });
-  }
-});
-
-// /payment-callback endpoint
-router.get('/payment-callback', async (req, res) => {
-  try {
-    const { reference } = req.query;
-    if (!reference) {
-      return res.redirect('/checkout?error=Missing reference');
-    }
-
-    const response = await axios.post(
-      'https://foremade-backend.onrender.com/api/verify-paystack-payment',
-      { reference },
-      {
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-
-    if (response.data.status === 'success') {
-      await updateDoc(doc(db, 'orders', reference), {
-        status: 'completed',
-        updatedAt: serverTimestamp(),
-      });
-      res.redirect('/order-confirmation?success=true');
-    } else {
-      res.redirect(`/checkout?error=${encodeURIComponent(response.data.error)}`);
-    }
-  } catch (error) {
-    console.error('Payment callback error:', error);
-    res.redirect(`/checkout?error=${encodeURIComponent(error.response?.data?.details || 'Payment verification failed')}`);
   }
 });
 

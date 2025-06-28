@@ -1,7 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const { db } = require('./firebaseConfig');
-const { doc, setDoc } = require('firebase/firestore');
 const router = express.Router();
 
 // /verify-bank-account endpoint
@@ -67,46 +65,6 @@ router.get('/fetch-banks', async (req, res) => {
   } catch (error) {
     console.error('Fetch banks error:', error);
     res.status(500).json({ error: 'Failed to fetch banks', details: error.response?.data?.message || error.message });
-  }
-});
-
-// /admin-bank endpoint
-router.post('/admin-bank', async (req, res) => {
-  try {
-    const { country, bankCode, accountNumber, iban, bankName } = req.body;
-    if (!country || (country === 'Nigeria' && (!bankCode || !accountNumber)) || (country === 'United Kingdom' && (!iban || !bankName))) {
-      return res.status(400).json({ error: 'Missing required bank details' });
-    }
-
-    if (country === 'Nigeria') {
-      const response = await axios.get(
-        `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      if (!response.data.status) {
-        return res.status(400).json({ error: 'Could not verify admin bank account', message: response.data.message });
-      }
-    }
-
-    await setDoc(doc(db, 'admin', 'bank'), {
-      country,
-      bankCode: country === 'Nigeria' ? bankCode : '',
-      accountNumber: country === 'Nigeria' ? accountNumber : '',
-      iban: country === 'United Kingdom' ? iban : '',
-      bankName: country === 'United Kingdom' ? bankName : (country === 'Nigeria' ? (await axios.get('https://api.paystack.co/bank')).data.data.find(b => b.code === bankCode).name : ''),
-      updatedAt: new Date().toISOString(),
-    });
-
-    res.json({ status: 'success', message: 'Admin bank details saved' });
-  } catch (error) {
-    // Skeptical: Bank verification can fail for fintechs like Opay
-    console.error('Admin bank setup error:', error);
-    res.status(500).json({ error: 'Failed to set admin bank', details: error.response?.data?.message || error.message });
   }
 });
 
