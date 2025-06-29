@@ -2,6 +2,76 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 
+/**
+ * @swagger
+ * /verify-recaptcha:
+ *   post:
+ *     summary: Verify reCAPTCHA token
+ *     description: Verify a reCAPTCHA token with Google's verification service
+ *     tags: [Security]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 description: reCAPTCHA token from client-side
+ *                 example: "03AFcWeA6r..."
+ *     responses:
+ *       200:
+ *         description: reCAPTCHA verification successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 score:
+ *                   type: number
+ *                   description: reCAPTCHA score (0.0 to 1.0)
+ *                   example: 0.9
+ *       400:
+ *         description: reCAPTCHA verification failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   description: Error message
+ *                 details:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   description: Error codes from Google
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   description: Error message
+ *                 details:
+ *                   type: string
+ *                   description: Error details
+ */
 // /verify-recaptcha endpoint
 router.post('/verify-recaptcha', async (req, res) => {
   console.log('reCAPTCHA request:', req.body);

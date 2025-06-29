@@ -13,6 +13,58 @@ console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Mi
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
 
+/**
+ * @swagger
+ * /create-payment-intent:
+ *   post:
+ *     summary: Create a Stripe payment intent for UK payments
+ *     description: Creates a payment intent for processing payments in the UK using Stripe
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 description: Payment amount in cents
+ *                 example: 5000
+ *               currency:
+ *                 type: string
+ *                 default: gbp
+ *                 example: gbp
+ *               metadata:
+ *                 type: object
+ *                 description: Additional payment metadata
+ *                 example: { sellerId: "seller123", handlingFee: 100, buyerProtectionFee: 50, taxFee: 25 }
+ *     responses:
+ *       200:
+ *         description: Payment intent created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 clientSecret:
+ *                   type: string
+ *                   description: Client secret for completing payment
+ *       400:
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // /create-payment-intent endpoint (for UK - Stripe)
 router.post('/create-payment-intent', async (req, res) => {
   try {
@@ -160,6 +212,68 @@ router.post('/verify-paystack-payment', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /initiate-paystack-payment:
+ *   post:
+ *     summary: Initiate a Paystack payment for Nigeria
+ *     description: Creates a payment session for processing payments in Nigeria using Paystack
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *               - email
+ *               - metadata
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 description: Payment amount in kobo
+ *                 example: 500000
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Customer email address
+ *                 example: customer@example.com
+ *               currency:
+ *                 type: string
+ *                 default: NGN
+ *                 example: NGN
+ *               metadata:
+ *                 type: object
+ *                 description: Payment metadata including seller ID
+ *                 example: { sellerId: "seller123", handlingFee: 1000, buyerProtectionFee: 500, taxFee: 250 }
+ *     responses:
+ *       200:
+ *         description: Payment initiated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 authorizationUrl:
+ *                   type: string
+ *                   description: URL to redirect customer for payment
+ *                 reference:
+ *                   type: string
+ *                   description: Payment reference number
+ *       400:
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // /initiate-paystack-payment endpoint (for Nigeria - Paystack)
 router.post('/initiate-paystack-payment', async (req, res) => {
   try {
@@ -281,6 +395,88 @@ router.post('/create-checkout-session', async (req, res) => {
   } catch (error) {
     console.error('Checkout session error:', error);
     res.status(500).json({ error: 'Failed to create checkout session', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /get-product-price:
+ *   get:
+ *     summary: Get product price in user's local currency
+ *     description: Returns product price converted to user's local currency based on location
+ *     tags: [Products]
+ *     parameters:
+ *       - in: query
+ *         name: price
+ *         required: true
+ *         schema:
+ *           type: number
+ *         description: Product price in NGN (base currency)
+ *         example: 50000
+ *       - in: header
+ *         name: x-user-country
+ *         schema:
+ *           type: string
+ *         description: User's country code (e.g., NG, GB, US)
+ *         example: GB
+ *     responses:
+ *       200:
+ *         description: Price converted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 originalPrice:
+ *                   type: number
+ *                   description: Original price in NGN
+ *                 convertedPrice:
+ *                   type: number
+ *                   description: Converted price in user's currency
+ *                 currency:
+ *                   type: string
+ *                   description: User's currency code
+ *                 symbol:
+ *                   type: string
+ *                   description: Currency symbol
+ *                 formattedPrice:
+ *                   type: string
+ *                   description: Formatted price with symbol
+ *       400:
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Example route showing currency conversion
+router.get('/get-product-price', (req, res) => {
+  try {
+    const { price } = req.query;
+    const { convertCurrency, formatCurrency } = require('./middleware');
+    
+    if (!price || isNaN(price)) {
+      return res.status(400).json({ error: 'Valid price is required' });
+    }
+
+    const originalPrice = parseFloat(price);
+    const userCurrency = req.userCurrency;
+    
+    // Convert price from NGN to user's currency
+    const convertedPrice = convertCurrency(originalPrice, 'NGN', userCurrency.code);
+    const formattedPrice = formatCurrency(convertedPrice, userCurrency.code);
+
+    res.json({
+      originalPrice,
+      convertedPrice,
+      currency: userCurrency.code,
+      symbol: userCurrency.symbol,
+      formattedPrice,
+      country: userCurrency.country
+    });
+  } catch (error) {
+    console.error('Currency conversion error:', error);
+    res.status(500).json({ error: 'Failed to convert currency', details: error.message });
   }
 });
 

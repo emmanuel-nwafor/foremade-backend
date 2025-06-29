@@ -12,6 +12,74 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+/**
+ * @swagger
+ * /send-product-approved-email:
+ *   post:
+ *     summary: Send product approval email
+ *     description: Send email notification when a product is approved
+ *     tags: [Email Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - productId
+ *               - productName
+ *               - sellerId
+ *             properties:
+ *               productId:
+ *                 type: string
+ *                 description: Product ID
+ *                 example: "product123"
+ *               productName:
+ *                 type: string
+ *                 description: Product name
+ *                 example: "iPhone 13 Pro"
+ *               sellerId:
+ *                 type: string
+ *                 description: Seller ID
+ *                 example: "seller123"
+ *               sellerEmail:
+ *                 type: string
+ *                 format: email
+ *                 description: Seller email (optional, will be fetched from database if not provided)
+ *                 example: "seller@example.com"
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Approval email sent to seller"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Product or seller not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // /send-product-approved-email endpoint
 router.post('/send-product-approved-email', async (req, res) => {
   try {
@@ -57,10 +125,10 @@ router.post('/send-product-approved-email', async (req, res) => {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #1a73e8;">Great news! Your Product is Live! 🎉</h2>
-          <p>We’re excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Foremade!</p>
+          <p>We're excited to inform you that your product <strong>"${productName}"</strong> (ID: ${productId}) has been approved by our team and is now live on Foremade!</p>
           <p>Customers can now view and purchase your product on our platform. To manage your listings or view performance, visit your seller dashboard:</p>
           <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
-          <p>Thank you for choosing Foremade. Let’s make those sales soar!</p>
+          <p>Thank you for choosing Foremade. Let's make those sales soar!</p>
           <p>Best regards,<br>The Foremade Team</p>
           <hr style="border-top: 1px solid #eee;">
           <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly. For support, contact us at <a href="mailto:support@foremade.com">support@foremade.com</a>.</p>
@@ -87,6 +155,79 @@ router.post('/send-product-approved-email', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /send-product-rejected-email:
+ *   post:
+ *     summary: Send product rejection email
+ *     description: Send email notification when a product is rejected
+ *     tags: [Email Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - productId
+ *               - productName
+ *               - sellerId
+ *               - reason
+ *             properties:
+ *               productId:
+ *                 type: string
+ *                 description: Product ID
+ *                 example: "product123"
+ *               productName:
+ *                 type: string
+ *                 description: Product name
+ *                 example: "iPhone 13 Pro"
+ *               sellerId:
+ *                 type: string
+ *                 description: Seller ID
+ *                 example: "seller123"
+ *               sellerEmail:
+ *                 type: string
+ *                 format: email
+ *                 description: Seller email (optional, will be fetched from database if not provided)
+ *                 example: "seller@example.com"
+ *               reason:
+ *                 type: string
+ *                 description: Reason for rejection
+ *                 example: "Product images do not meet quality standards"
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Rejection email sent to seller"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Product or seller not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // /send-product-rejected-email endpoint
 router.post('/send-product-rejected-email', async (req, res) => {
   try {
@@ -133,7 +274,7 @@ router.post('/send-product-rejected-email', async (req, res) => {
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #d32f2f;">Update: Your Product Was Not Approved</h2>
           <p>Dear Seller,</p>
-          <p>We’re sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Foremade after our team’s review.</p>
+          <p>We're sorry to inform you that your product "<strong>${productName}</strong>" (ID: ${productId}) was not approved for listing on Foremade after our team's review.</p>
           <p><strong>Reason for Rejection:</strong> ${reason}</p>
           <p>Please review our <a href="https://foremade.com/guidelines" style="color: #1a73e8;">seller guidelines</a> to ensure your product meets our standards. You can update and resubmit your product via your seller dashboard:</p>
           <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
@@ -166,6 +307,97 @@ router.post('/send-product-rejected-email', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /send-order-confirmation:
+ *   post:
+ *     summary: Send order confirmation email
+ *     description: Send order confirmation email to customer
+ *     tags: [Email Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderId
+ *               - email
+ *               - items
+ *               - total
+ *             properties:
+ *               orderId:
+ *                 type: string
+ *                 description: Order ID
+ *                 example: "order123"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Customer email address
+ *                 example: "customer@example.com"
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     name:
+ *                       type: string
+ *                       description: Product name
+ *                     quantity:
+ *                       type: integer
+ *                       description: Quantity ordered
+ *                     price:
+ *                       type: number
+ *                       description: Unit price
+ *                     imageUrls:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       description: Product image URLs
+ *                 description: Array of ordered items
+ *               total:
+ *                 type: number
+ *                 description: Total order amount
+ *                 example: 50000
+ *               currency:
+ *                 type: string
+ *                 enum: [ngn, gbp]
+ *                 default: ngn
+ *                 description: Currency code
+ *                 example: "ngn"
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Order confirmation email sent"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // /send-order-confirmation endpoint
 router.post('/send-order-confirmation', async (req, res) => {
   try {
@@ -283,6 +515,78 @@ router.post('/send-order-confirmation', async (req, res) => {
       payload: JSON.stringify(req.body, null, 2),
     });
     res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /api/youth-empowerment:
+ *   post:
+ *     summary: Submit youth empowerment application
+ *     description: Send youth empowerment application form data via email
+ *     tags: [Applications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: Youth empowerment application form data
+ *             example: {
+ *               "firstName": "John",
+ *               "lastName": "Doe",
+ *               "email": "john@example.com",
+ *               "phone": "+2348012345678",
+ *               "age": 25,
+ *               "location": "Lagos, Nigeria",
+ *               "education": "Bachelor's Degree",
+ *               "skills": ["Web Development", "Digital Marketing"],
+ *               "motivation": "I want to start my own business..."
+ *             }
+ *     responses:
+ *       200:
+ *         description: Application sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Application sent successfully!"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Route for Youth Empowerment Form
+router.post('/api/youth-empowerment', async (req, res) => {
+  const formData = req.body;
+  try {
+    console.log('[YOUTH EMPOWERMENT] Received formData:', formData);
+    console.log('[YOUTH EMPOWERMENT] EMAIL_USER:', process.env.EMAIL_USER);
+    console.log('[YOUTH EMPOWERMENT] EMAIL_PASS:', process.env.EMAIL_PASS ? 'SET' : 'NOT SET');
+    console.log('[YOUTH EMPOWERMENT] Sending to:', 'yehub@foremade.com');
+    await transporter.sendMail({
+      from: `"Foremade" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+      to: 'yehub@foremade.com', // Updated target email
+      subject: 'New Youth Empowerment Application',
+      text: JSON.stringify(formData, null, 2),
+      html: `<pre>${JSON.stringify(formData, null, 2)}</pre>`,
+    });
+    res.status(200).json({ message: 'Application sent successfully!' });
+  } catch (err) {
+    console.error('[YOUTH EMPOWERMENT] Failed to send email:', {
+      message: err.message,
+      stack: err.stack,
+      error: err,
+      formData,
+      emailUser: process.env.EMAIL_USER,
+      emailPassSet: !!process.env.EMAIL_PASS
+    });
+    res.status(500).json({ error: 'Failed to send email.', details: err.message });
   }
 });
 

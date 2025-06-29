@@ -3,6 +3,60 @@ const { cloudinary } = require('./cloudinaryConfig');
 const { upload } = require('./middleware');
 const router = express.Router();
 
+/**
+ * @swagger
+ * /upload:
+ *   post:
+ *     summary: Upload file to Cloudinary
+ *     description: Upload images or videos to Cloudinary storage
+ *     tags: [File Upload]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: File to upload (image or video)
+ *               isVideo:
+ *                 type: string
+ *                 enum: ["true", "false"]
+ *                 default: "false"
+ *                 description: Whether the file is a video
+ *     responses:
+ *       200:
+ *         description: File uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 url:
+ *                   type: string
+ *                   description: Cloudinary URL of uploaded file
+ *                   example: "https://res.cloudinary.com/example/image/upload/v1234567890/products/filename.jpg"
+ *                 message:
+ *                   type: string
+ *                   description: Success message
+ *                   example: "Image uploaded successfully"
+ *       400:
+ *         description: Invalid file or missing file
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // /upload endpoint
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
