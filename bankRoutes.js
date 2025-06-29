@@ -23,6 +23,7 @@ router.post('/admin-bank', async (req, res) => {
 
 router.get('/fetch-banks', async (req, res) => {
   try {
+    console.log('Fetching banks, PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY); // Debug
     const response = await axios.get('https://api.paystack.co/bank?country=nigeria', {
       headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
     });
@@ -31,7 +32,7 @@ router.get('/fetch-banks', async (req, res) => {
     }
     res.json(response.data.data);
   } catch (error) {
-    console.error('Fetch banks error:', error);
+    console.error('Fetch banks error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to fetch banks', details: error.message });
   }
 });
