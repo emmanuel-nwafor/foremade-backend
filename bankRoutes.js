@@ -1,6 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const soap = require('soap');
+const { db } = require('./firebaseConfig');
+const { doc, setDoc, getDoc } = require('firebase/firestore');
 const router = express.Router();
 
 /**
@@ -56,44 +58,25 @@ const router = express.Router();
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /verify-bank-account endpoint
 router.post('/verify-bank-account', async (req, res) => {
   try {
     const { accountNumber, bankCode } = req.body;
     if (!accountNumber || !bankCode) {
-      return res.status(400).json({ error: 'Missing accountNumber or bankCode' });
+      return res.status(400).json({ error: 'Account number and bank code required' });
     }
-
-    console.log('Verifying account with PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Key is set' : 'Key is NOT set');
-    console.log('Request URL:', `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`);
-
     const response = await axios.get(
       `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
       {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
       }
     );
-
-    console.log('Paystack Response Status:', response.status);
-    console.log('Paystack Response Data:', response.data);
-
-    if (response.data.status) {
-      res.json({
-        status: 'success',
-        accountName: response.data.data.account_name,
-      });
-    } else {
-      res.status(400).json({ error: 'Could not verify account', message: response.data.message });
+    if (!response.data.status) {
+      throw new Error('Account verification failed');
     }
+    res.json(response.data.data);
   } catch (error) {
-    console.error('Bank verification error:', error);
-    res.status(500).json({
-      error: 'Failed to verify bank account',
-      details: error.response?.data?.message || error.message,
-    });
+    console.error('Verify bank error:', error);
+    res.status(500).json({ error: 'Failed to verify bank account', details: error.response?.data?.message || error.message });
   }
 });
 
@@ -149,28 +132,52 @@ router.post('/verify-bank-account', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /fetch-banks endpoint
 router.get('/fetch-banks', async (req, res) => {
   try {
-    console.log('Fetching banks with PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Key is set' : 'Key is NOT set');
-    const response = await axios.get('https://api.paystack.co/bank', {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
+    console.log('Fetching banks, PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY); // Debug
+    const response = await axios.get('https://api.paystack.co/bank?country=nigeria', {
+      headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
     });
-
-    console.log('Paystack Bank Fetch Response Status:', response.status);
-    console.log('Paystack Bank Fetch Data:', response.data);
-
-    if (response.data.status) {
-      res.json(response.data.data);
-    } else {
+    if (!response.data.status) {
       throw new Error('Failed to fetch banks');
     }
+    res.json(response.data.data);
   } catch (error) {
-    console.error('Fetch banks error:', error);
-    res.status(500).json({ error: 'Failed to fetch banks', details: error.response?.data?.message || error.message });
+    console.error('Fetch banks error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch banks', details: error.message });
+  }
+});
+
+// Admin bank endpoint
+router.post('/admin-bank', async (req, res) => {
+  try {
+    const { country, bankCode, accountNumber, iban, bankName } = req.body;
+    console.log('Received payload:', req.body); // Debug
+
+    // Validate required fields
+    if (country === 'Nigeria' && (!bankCode || !accountNumber)) {
+      return res.status(400).json({ error: 'Bank code and account number required for Nigeria' });
+    }
+    if (country === 'United Kingdom' && (!iban || !bankName)) {
+      return res.status(400).json({ error: 'IBAN and bank name required for UK' });
+    }
+
+    // Prepare data object, excluding undefined fields
+    const data = { country };
+    if (country === 'Nigeria' && bankCode && accountNumber) {
+      data.bankCode = bankCode;
+      data.accountNumber = accountNumber;
+    }
+    if (country === 'United Kingdom' && iban && bankName) {
+      data.iban = iban;
+      data.bankName = bankName;
+    }
+
+    await setDoc(doc(db, 'admin', 'bank'), data, { merge: true });
+    res.json({ message: 'Admin bank details saved' });
+  } catch (error) {
+    console.error('Admin bank error:', error);
+    res.status(500).json({ error: 'Failed to save admin bank details', details: error.message });
   }
 });
 

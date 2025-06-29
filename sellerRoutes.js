@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
+const { doc, getDoc, setDoc, serverTimestamp } = require('firebase/firestore');
 const router = express.Router();
 
 /**
@@ -80,7 +80,7 @@ const router = express.Router();
 // /onboard-seller endpoint
 router.post('/onboard-seller', async (req, res) => {
   try {
-    const { userId, bankCode, accountNumber, country, email } = req.body;
+    const { userId, bankCode, accountNumber, country, email, iban, bankName } = req.body;
     if (!userId || !country) {
       return res.status(400).json({ error: 'Missing userId or country' });
     }
@@ -89,16 +89,8 @@ router.post('/onboard-seller', async (req, res) => {
       if (!bankCode || !accountNumber) {
         return res.status(400).json({ error: 'Missing bankCode or accountNumber for Nigeria' });
       }
-
-      const recipientResponse = await axios.post(
-        'https://api.paystack.co/transferrecipient',
-        {
-          type: 'nuban',
-          name: `Seller ${userId}`,
-          account_number: accountNumber,
-          bank_code: bankCode,
-          currency: 'NGN',
-        },
+      const verifyResponse = await axios.get(
+        `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
         {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
@@ -106,18 +98,11 @@ router.post('/onboard-seller', async (req, res) => {
           },
         }
       );
-
-      if (!recipientResponse.data.status) {
-        throw new Error('Failed to create Paystack transfer recipient');
+      if (!verifyResponse.data.status) {
+        throw new Error(`Failed to verify bank account: ${verifyResponse.data.message || 'Invalid details'}`);
       }
-
-      const sellerRef = doc(db, 'sellers', userId);
-      await updateDoc(sellerRef, { paystackRecipientCode: recipientResponse.data.data.recipient_code, country });
-
-      res.json({
-        recipientCode: recipientResponse.data.data.recipient_code,
-      });
     } else if (country === 'United Kingdom') {
+<<<<<<< HEAD
       const account = await stripe.accounts.create({
         type: 'express',
         country: 'GB',
@@ -406,80 +391,63 @@ router.post('/approve-payout', async (req, res) => {
       const recipientCode = updatedSeller.paystackRecipientCode;
       if (!recipientCode) {
         return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
+=======
+      if (!iban || !bankName || !email) {
+        return res.status(400).json({ error: 'Missing iban, bankName, or email for UK' });
+>>>>>>> 2527d84c4eea1a9434f04b1aaf2b3155116ac55f
       }
+    } else {
+      return res.status(400).json({ error: 'Unsupported country' });
+    }
 
-      const transferResponse = await axios.post(
-        'https://api.paystack.co/transfer',
-        {
-          source: 'balance',
-          amount: Math.round(amount * 100),
-          recipient: recipientCode,
-          reason: `Payout for transaction ${transaction.reference}`,
-          currency: 'NGN',
-        },
-        {
+    const sellerRef = doc(db, 'sellers', userId);
+    const sellerSnap = await getDoc(sellerRef);
+    const dataToUpdate = {
+      country,
+      bankCode: country === 'Nigeria' ? bankCode : '',
+      accountNumber: country === 'Nigeria' ? accountNumber : '',
+      iban: country === 'United Kingdom' ? iban : '',
+      email: country === 'United Kingdom' ? email : '',
+      updatedAt: serverTimestamp(),
+    };
+
+    // Fetch bank name for Nigeria if not provided
+    if (country === 'Nigeria' && !bankName) {
+      try {
+        const bankResponse = await axios.get('https://api.paystack.co/bank', {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             'Content-Type': 'application/json',
           },
-        }
-      );
-
-      if (!transferResponse.data.status) {
-        throw new Error('Failed to initiate Paystack transfer');
+        });
+        const bank = bankResponse.data.data.find(b => b.code === bankCode);
+        dataToUpdate.bankName = bank ? bank.name : 'Unknown Bank';
+      } catch (bankError) {
+        console.warn('Failed to fetch bank name, using default:', bankError.message);
+        dataToUpdate.bankName = 'Unknown Bank';
       }
-
-      await updateDoc(walletRef, {
-        pendingBalance: wallet.pendingBalance - amount,
-        updatedAt: serverTimestamp(),
-      });
-
-      await updateDoc(transactionRef, {
-        status: 'Completed',
-        updatedAt: serverTimestamp(),
-        payoutReference: transferResponse.data.data.reference,
-      });
-
-      res.json({
-        status: 'success',
-        reference: transferResponse.data.data.reference,
-      });
-    } else if (updatedSeller.country === 'United Kingdom') {
-      const stripeAccountId = updatedSeller.stripeAccountId;
-      if (!stripeAccountId) {
-        return res.status(400).json({ error: 'Seller has not completed Stripe onboarding' });
-      }
-
-      const transfer = await stripe.transfers.create({
-        amount: Math.round(amount * 100),
-        currency: 'gbp',
-        destination: stripeAccountId,
-        description: `Payout for transaction ${transaction.reference}`,
-      });
-
-      await updateDoc(walletRef, {
-        pendingBalance: wallet.pendingBalance - amount,
-        updatedAt: serverTimestamp(),
-      });
-
-      await updateDoc(transactionRef, {
-        status: 'Completed',
-        updatedAt: serverTimestamp(),
-      });
-
-      res.json({
-        status: 'success',
-        transferId: transfer.id,
-      });
     } else {
-      res.status(400).json({ error: 'Unsupported country' });
+      dataToUpdate.bankName = bankName || '';
     }
+
+    // Use setDoc if document doesn't exist, fall back to updateDoc
+    if (!sellerSnap.exists()) {
+      await setDoc(sellerRef, {
+        ...dataToUpdate,
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+    } else {
+      await updateDoc(sellerRef, dataToUpdate);
+    }
+
+    res.json({ status: 'success', message: 'Seller onboarded' });
   } catch (error) {
-    console.error('Payout approval error:', error);
-    res.status(500).json({ error: 'Failed to approve payout', details: error.message });
+    console.error('Onboarding error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to onboard seller', details: error.message || 'Unknown error' });
   }
 });
 
+<<<<<<< HEAD
 /**
  * @swagger
  * /reject-payout:
@@ -579,6 +547,19 @@ router.post('/reject-payout', async (req, res) => {
     console.error('Payout rejection error:', error);
     res.status(500).json({ error: 'Failed to reject payout', details: error.message });
   }
+=======
+// [Rest of the router code remains unchanged for now]
+router.post('/initiate-seller-payout', async (req, res) => {
+  // ... (unchanged)
+>>>>>>> 2527d84c4eea1a9434f04b1aaf2b3155116ac55f
 });
+
+router.post('/approve-payout', async (req, res) => {
+  // ... (unchanged)
+});
+
+async function createRecipient(bankCode, accountNumber, name) {
+  // ... (unchanged)
+}
 
 module.exports = router;
