@@ -7,13 +7,28 @@ const router = express.Router();
 router.post('/admin-bank', async (req, res) => {
   try {
     const { country, bankCode, accountNumber, iban, bankName } = req.body;
+    console.log('Received payload:', req.body); // Debug
+
+    // Validate required fields
     if (country === 'Nigeria' && (!bankCode || !accountNumber)) {
       return res.status(400).json({ error: 'Bank code and account number required for Nigeria' });
     }
     if (country === 'United Kingdom' && (!iban || !bankName)) {
       return res.status(400).json({ error: 'IBAN and bank name required for UK' });
     }
-    await setDoc(doc(db, 'admin', 'bank'), { country, bankCode, accountNumber, iban, bankName });
+
+    // Prepare data object, excluding undefined fields
+    const data = { country };
+    if (country === 'Nigeria' && bankCode && accountNumber) {
+      data.bankCode = bankCode;
+      data.accountNumber = accountNumber;
+    }
+    if (country === 'United Kingdom' && iban && bankName) {
+      data.iban = iban;
+      data.bankName = bankName;
+    }
+
+    await setDoc(doc(db, 'admin', 'bank'), data, { merge: true });
     res.json({ message: 'Admin bank details saved' });
   } catch (error) {
     console.error('Admin bank error:', error);
