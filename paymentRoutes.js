@@ -6,29 +6,20 @@ const crypto = require('crypto');
 const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 const router = express.Router();
 
-// Log env vars for debugging
-console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
-console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
-console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
-
-// /create-payment-intent endpoint (for UK - Stripe)
 router.post('/create-payment-intent', async (req, res) => {
   try {
     if (!req.body) {
       return res.status(400).json({ error: 'Request body is missing' });
     }
-
     const { amount, currency = 'gbp', metadata } = req.body;
     if (!amount || amount <= 0 || !metadata.sellerId) {
       return res.status(400).json({ error: 'Invalid amount or missing sellerId' });
     }
-
     const adminBankRef = doc(db, 'admin', 'bank');
     const adminBankSnap = await getDoc(adminBankRef);
     if (!adminBankSnap.exists() || adminBankSnap.data().country !== 'United Kingdom') {
       return res.status(500).json({ error: 'Admin bank not configured for UK' });
     }
-
     const totalAmountInCents = Math.round(amount);
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalAmountInCents,
@@ -36,7 +27,6 @@ router.post('/create-payment-intent', async (req, res) => {
       metadata,
       automatic_payment_methods: { enabled: true },
     });
-
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (error) {
     console.error('Payment intent error:', error);
@@ -44,7 +34,6 @@ router.post('/create-payment-intent', async (req, res) => {
   }
 });
 
-// /paystack-webhook endpoint
 router.post('/paystack-webhook', async (req, res) => {
   try {
     const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -55,16 +44,13 @@ router.post('/paystack-webhook', async (req, res) => {
       console.error('Invalid Paystack webhook signature');
       return res.status(400).json({ error: 'Invalid signature' });
     }
-
     const event = req.body;
     console.log('Paystack webhook event:', event);
-
     if (event.event === 'charge.success') {
       const { reference, amount, metadata } = event.data;
       const amountInKobo = amount;
       const sellerId = metadata.sellerId;
       const adminFees = (metadata.handlingFee || 0) + (metadata.buyerProtectionFee || 0) + (metadata.taxFee || 0);
-
       const q = query(
         collection(db, 'transactions'),
         where('reference', '==', reference),
@@ -75,22 +61,17 @@ router.post('/paystack-webhook', async (req, res) => {
         console.warn(`No Initiated transaction found for reference ${reference}`);
         return res.status(200).json({ status: 'success' });
       }
-
       const transactionDoc = doc(db, 'transactions', querySnapshot.docs[0].id);
       const netAmount = (amountInKobo - adminFees) / 100;
-
       const walletRef = doc(db, 'wallets', sellerId);
       const walletSnap = await getDoc(walletRef);
       const walletData = walletSnap.exists() ? walletSnap.data() : { availableBalance: 0, pendingBalance: 0 };
-
       const adminBankRef = doc(db, 'admin', 'bank');
       const adminBankSnap = await getDoc(adminBankRef);
       if (!adminBankSnap.exists()) {
         throw new Error('Admin bank not configured');
       }
       const adminBank = adminBankSnap.data();
-
-      // Transfer fees to admin's bank
       const adminTransfer = await axios.post(
         'https://api.paystack.co/transfer',
         {
@@ -107,22 +88,18 @@ router.post('/paystack-webhook', async (req, res) => {
           },
         }
       );
-
       if (!adminTransfer.data.status) {
         throw new Error('Failed to transfer admin fees');
       }
-
       await updateDoc(walletRef, {
         pendingBalance: (walletData.pendingBalance || 0) + netAmount,
         updatedAt: serverTimestamp(),
       });
-
       await updateDoc(transactionDoc, {
         status: 'Completed',
         updatedAt: serverTimestamp(),
         adminTransferReference: adminTransfer.data.data.reference,
       });
-
       await addDoc(collection(db, 'transactions'), {
         userId: sellerId,
         type: 'Sale',
@@ -133,10 +110,8 @@ router.post('/paystack-webhook', async (req, res) => {
         createdAt: serverTimestamp(),
         reference,
       });
-
       console.log(`Processed charge.success for reference ${reference}: credited ${netAmount} to seller ${sellerId}`);
     }
-
     res.status(200).json({ status: 'success' });
   } catch (error) {
     console.error('Paystack webhook error:', error);
@@ -144,7 +119,6 @@ router.post('/paystack-webhook', async (req, res) => {
   }
 });
 
-// Helper function to create Paystack recipient
 async function createRecipient(bankCode, accountNumber, name) {
   const response = await axios.post(
     'https://api.paystack.co/transferrecipient',
@@ -168,14 +142,12 @@ async function createRecipient(bankCode, accountNumber, name) {
   return response.data.data.recipient_code;
 }
 
-// /verify-paystack-payment endpoint
 router.post('/verify-paystack-payment', async (req, res) => {
   try {
     const { reference } = req.body;
     if (!reference) {
       return res.status(400).json({ error: 'Missing reference' });
     }
-
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
@@ -185,11 +157,9 @@ router.post('/verify-paystack-payment', async (req, res) => {
         },
       }
     );
-
     if (!response.data.status || response.data.data.status !== 'success') {
       return res.status(400).json({ error: 'Payment not successful', details: response.data.message });
     }
-
     const q = query(
       collection(db, 'transactions'),
       where('reference', '==', reference),
@@ -199,7 +169,6 @@ router.post('/verify-paystack-payment', async (req, res) => {
     if (querySnapshot.empty) {
       return res.status(400).json({ error: 'Payment not confirmed in system' });
     }
-
     res.json({ status: 'success', data: response.data.data });
   } catch (error) {
     console.error('Paystack verification error:', error);
@@ -207,16 +176,13 @@ router.post('/verify-paystack-payment', async (req, res) => {
   }
 });
 
-// /initiate-paystack-payment endpoint (for Nigeria - Paystack)
 router.post('/initiate-paystack-payment', async (req, res) => {
   try {
     if (!req.body) {
       return res.status(400).json({ error: 'Request body is missing' });
     }
-
     const { amount, email, currency = 'NGN', metadata } = req.body;
     console.log('Paystack Request Payload:', { amount, email, currency, metadata });
-
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
@@ -229,16 +195,13 @@ router.post('/initiate-paystack-payment', async (req, res) => {
     if (!process.env.PAYSTACK_SECRET_KEY) {
       return res.status(500).json({ error: 'Paystack secret key not configured' });
     }
-
     const adminFees = (metadata?.handlingFee || 0) + (metadata?.buyerProtectionFee || 0) + (metadata?.taxFee || 0);
     const sellerId = metadata.sellerId;
     const reference = `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-
     const amountInKobo = Math.round(amount);
     if (isNaN(amountInKobo) || amountInKobo <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
     }
-
     const payload = {
       amount: amountInKobo,
       email,
@@ -248,9 +211,7 @@ router.post('/initiate-paystack-payment', async (req, res) => {
       channels: ['card', 'bank'],
       callback_url: `${process.env.DOMAIN}/payment-callback`,
     };
-
     console.log('Paystack Payload Sent:', payload);
-
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       payload,
@@ -261,9 +222,7 @@ router.post('/initiate-paystack-payment', async (req, res) => {
         },
       }
     );
-
     console.log('Paystack API Response:', response.data);
-
     if (response.data.status) {
       await addDoc(collection(db, 'transactions'), {
         userId: sellerId,
@@ -276,7 +235,6 @@ router.post('/initiate-paystack-payment', async (req, res) => {
         createdAt: serverTimestamp(),
         reference,
       });
-
       res.json({
         authorizationUrl: response.data.data.authorization_url,
         reference: response.data.data.reference,
@@ -293,60 +251,19 @@ router.post('/initiate-paystack-payment', async (req, res) => {
   }
 });
 
-// /create-checkout-session endpoint
-router.post('/create-checkout-session', async (req, res) => {
-  try {
-    if (!req.body) {
-      return res.status(400).json({ error: 'Request body is missing' });
-    }
-
-    const { amount } = req.body;
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'ngn',
-            product_data: {
-              name: 'Wallet Deposit',
-            },
-            unit_amount: amount,
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      success_url: `${process.env.DOMAIN}/wallet?success=true`,
-      cancel_url: `${process.env.DOMAIN}/wallet?cancelled=true`,
-    });
-
-    res.json({ id: session.id });
-  } catch (error) {
-    console.error('Checkout session error:', error);
-    res.status(500).json({ error: 'Failed to create checkout session', details: error.message });
-  }
-});
-
-// /payment-callback endpoint
 router.get('/payment-callback', async (req, res) => {
   try {
     const { reference } = req.query;
     if (!reference) {
       return res.redirect('/checkout?error=Missing reference');
     }
-
     const response = await axios.post(
-      'https://foremade-backend.onrender.com/api/verify-paystack-payment',
+      'https://foremade-backend.onrender.com/verify-paystack-payment',
       { reference },
       {
         headers: { 'Content-Type': 'application/json' },
       }
     );
-
     if (response.data.status === 'success') {
       await updateDoc(doc(db, 'orders', reference), {
         status: 'completed',
