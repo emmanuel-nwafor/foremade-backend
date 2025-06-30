@@ -57,7 +57,7 @@ router.post('/onboard-seller', async (req, res) => {
             'Content-Type': 'application/json',
           },
         });
-        const bank = bankResponse.data.data.find(b => b.code === bankCode);
+        const bank = bankResponse.data.data.find((b) => b.code === bankCode);
         dataToUpdate.bankName = bank ? bank.name : 'Unknown Bank';
       } catch (bankError) {
         console.warn('Failed to fetch bank name, using default:', bankError.message);
@@ -84,13 +84,64 @@ router.post('/onboard-seller', async (req, res) => {
   }
 });
 
-// [Rest of the router code remains unchanged for now]
-router.post('/initiate-seller-payout', async (req, res) => {
-  // ... (unchanged)
-});
+// New /process-withdrawal endpoint for withdrawal processing
+router.post('/process-withdrawal', async (req, res) => {
+  try {
+    const { amount, currency, sellerId, orderId, handlingFee, buyerProtectionFee, taxFee } = req.body;
 
-router.post('/approve-payout', async (req, res) => {
-  // ... (unchanged)
+    if (!amount || !sellerId || !orderId || !currency) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const totalFees = handlingFee + buyerProtectionFee + taxFee;
+    const sellerAmount = amount - totalFees;
+
+    // Update seller's wallet in Firestore
+    const walletRef = doc(db, 'wallets', sellerId);
+    await db.runTransaction(async (transaction) => {
+      const walletDoc = await transaction.get(walletRef);
+      if (!walletDoc.exists) {
+        throw new Error('Seller wallet not found');
+      }
+      const newPendingBalance = (walletDoc.data().pendingBalance || 0) - sellerAmount;
+      if (newPendingBalance < 0) {
+        throw new Error('Insufficient pending balance');
+      }
+      transaction.update(walletRef, { pendingBalance: newPendingBalance });
+    });
+
+    // Paystack transfer to seller's account
+    const sellerRef = doc(db, 'sellers', sellerId);
+    const sellerDoc = await getDoc(sellerRef);
+    if (!sellerDoc.exists) {
+      throw new Error('Seller details not found');
+    }
+    const sellerData = sellerDoc.data();
+    const paystackPayload = {
+      source: 'balance',
+      amount: Math.round(sellerAmount * 100), // Convert to kobo
+      recipient: sellerData.accountNumber || sellerData.iban, // Use accountNumber for NG, iban for UK
+      reason: `Withdrawal ${orderId} for ${sellerId}`,
+    };
+
+    const paystackResponse = await axios.post(
+      'https://api.paystack.co/transfer',
+      paystackPayload,
+      {
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
+      }
+    );
+
+    if (paystackResponse.data.status) {
+      console.log('Withdrawal processed:', paystackResponse.data.data);
+      res.status(200).json({ message: 'Withdrawal processed successfully', sellerAmount, feesPaid: totalFees });
+    } else {
+      throw new Error('Paystack transfer failed');
+    }
+  } catch (error) {
+    console.error('Withdrawal processing error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 async function createRecipient(bankCode, accountNumber, name) {
