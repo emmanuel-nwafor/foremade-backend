@@ -2,81 +2,9 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const { doc, getDoc, setDoc, serverTimestamp } = require('firebase/firestore');
+const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection } = require('firebase/firestore');
 const router = express.Router();
 
-/**
- * @swagger
- * /onboard-seller:
- *   post:
- *     summary: Onboard seller for payments
- *     description: Set up seller account for receiving payments via Stripe (UK) or Paystack (Nigeria)
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - userId
- *               - country
- *             properties:
- *               userId:
- *                 type: string
- *                 description: User ID
- *                 example: "user123"
- *               country:
- *                 type: string
- *                 enum: [Nigeria, United Kingdom]
- *                 description: Seller's country
- *                 example: "Nigeria"
- *               bankCode:
- *                 type: string
- *                 description: Bank code (required for Nigeria)
- *                 example: "044"
- *               accountNumber:
- *                 type: string
- *                 description: Bank account number (required for Nigeria)
- *                 example: "0123456789"
- *               email:
- *                 type: string
- *                 format: email
- *                 description: Email address (required for UK)
- *                 example: "seller@example.com"
- *     responses:
- *       200:
- *         description: Seller onboarded successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 recipientCode:
- *                   type: string
- *                   description: Paystack recipient code (Nigeria)
- *                   example: "RCP_1234567890"
- *                 stripeAccountId:
- *                   type: string
- *                   description: Stripe account ID (UK)
- *                   example: "acct_1234567890"
- *                 redirectUrl:
- *                   type: string
- *                   description: Stripe onboarding URL (UK)
- *                   example: "https://connect.stripe.com/setup/s/1234567890"
- *       400:
- *         description: Invalid request data
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 // /onboard-seller endpoint
 router.post('/onboard-seller', async (req, res) => {
   try {
@@ -101,8 +29,33 @@ router.post('/onboard-seller', async (req, res) => {
       if (!verifyResponse.data.status) {
         throw new Error(`Failed to verify bank account: ${verifyResponse.data.message || 'Invalid details'}`);
       }
+      const recipientResponse = await axios.post(
+        'https://api.paystack.co/transferrecipient',
+        {
+          type: 'nuban',
+          name: userId,
+          account_number: accountNumber,
+          bank_code: bankCode,
+          currency: 'NGN',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      if (!recipientResponse.data.status) {
+        throw new Error(`Failed to create Paystack recipient: ${recipientResponse.data.message}`);
+      }
+      const recipientCode = recipientResponse.data.data.recipient_code;
+      const sellerRef = doc(db, 'sellers', userId);
+      await updateDoc(sellerRef, { paystackRecipientCode: recipientCode, country });
+      res.json({ recipientCode });
     } else if (country === 'United Kingdom') {
-<<<<<<< HEAD
+      if (!iban || !bankName || !email) {
+        return res.status(400).json({ error: 'Missing iban, bankName, or email for UK' });
+      }
       const account = await stripe.accounts.create({
         type: 'express',
         country: 'GB',
@@ -110,6 +63,13 @@ router.post('/onboard-seller', async (req, res) => {
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },
+        },
+        external_account: {
+          object: 'bank_account',
+          country: 'GB',
+          currency: 'GBP',
+          account_number: iban.replace(/[^0-9]/g, ''),
+          routing_number: bankName,
         },
       });
 
@@ -122,99 +82,19 @@ router.post('/onboard-seller', async (req, res) => {
 
       const sellerRef = doc(db, 'sellers', userId);
       await updateDoc(sellerRef, { stripeAccountId: account.id, country });
-
       res.json({
         stripeAccountId: account.id,
         redirectUrl: accountLink.url,
       });
     } else {
-      res.status(400).json({ error: 'Unsupported country' });
+      return res.status(400).json({ error: 'Unsupported country' });
     }
   } catch (error) {
-    console.error('Onboarding error:', error);
-    res.status(500).json({ error: 'Failed to onboard seller', details: error.message });
+    console.error('Onboarding error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to onboard seller', details: error.message || 'Unknown error' });
   }
 });
 
-/**
- * @swagger
- * /initiate-seller-payout:
- *   post:
- *     summary: Initiate seller payout
- *     description: Initiate a payout request for a seller
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - sellerId
- *               - amount
- *               - transactionReference
- *             properties:
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *               amount:
- *                 type: number
- *                 description: Payout amount
- *                 example: 50000
- *               transactionReference:
- *                 type: string
- *                 description: Unique transaction reference
- *                 example: "TXN_1234567890"
- *               bankCode:
- *                 type: string
- *                 description: Bank code (for Nigeria)
- *                 example: "044"
- *               accountNumber:
- *                 type: string
- *                 description: Account number (for Nigeria)
- *                 example: "0123456789"
- *               country:
- *                 type: string
- *                 enum: [Nigeria, United Kingdom]
- *                 description: Seller's country
- *                 example: "Nigeria"
- *               email:
- *                 type: string
- *                 format: email
- *                 description: Email address (for UK)
- *                 example: "seller@example.com"
- *     responses:
- *       200:
- *         description: Payout initiated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 transactionId:
- *                   type: string
- *                   description: Transaction ID
- *                   example: "transaction123"
- *                 message:
- *                   type: string
- *                   example: "Withdrawal request submitted, awaiting admin approval"
- *       400:
- *         description: Invalid request or insufficient balance
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 // /initiate-seller-payout endpoint
 router.post('/initiate-seller-payout', async (req, res) => {
   try {
@@ -266,67 +146,6 @@ router.post('/initiate-seller-payout', async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /approve-payout:
- *   post:
- *     summary: Approve seller payout
- *     description: Approve and process a seller payout request
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - sellerId
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: Transaction ID
- *                 example: "transaction123"
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *     responses:
- *       200:
- *         description: Payout approved and processed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 reference:
- *                   type: string
- *                   description: Transfer reference (Nigeria)
- *                   example: "TRF_1234567890"
- *                 transferId:
- *                   type: string
- *                   description: Stripe transfer ID (UK)
- *                   example: "tr_1234567890"
- *                 redirectUrl:
- *                   type: string
- *                   description: Stripe onboarding URL (if needed)
- *                   example: "https://connect.stripe.com/setup/s/1234567890"
- *       400:
- *         description: Invalid request or transaction not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 // /approve-payout endpoint
 router.post('/approve-payout', async (req, res) => {
   try {
@@ -362,19 +181,18 @@ router.post('/approve-payout', async (req, res) => {
     }
     const seller = sellerSnap.data();
 
-    const country = transaction.country;
-    if (!seller.paystackRecipientCode && country === 'Nigeria') {
+    if (!seller.paystackRecipientCode && transaction.country === 'Nigeria') {
       const onboardingResponse = await axios.post('http://localhost:5000/api/onboard-seller', {
         userId: sellerId,
         bankCode: transaction.bankCode,
         accountNumber: transaction.accountNumber,
-        country,
+        country: transaction.country,
       });
       if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
-    } else if (!seller.stripeAccountId && country === 'United Kingdom') {
+    } else if (!seller.stripeAccountId && transaction.country === 'United Kingdom') {
       const onboardingResponse = await axios.post('http://localhost:5000/api/onboard-seller', {
         userId: sellerId,
-        country,
+        country: transaction.country,
         email: transaction.email,
       });
       if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
@@ -391,115 +209,65 @@ router.post('/approve-payout', async (req, res) => {
       const recipientCode = updatedSeller.paystackRecipientCode;
       if (!recipientCode) {
         return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
-=======
-      if (!iban || !bankName || !email) {
-        return res.status(400).json({ error: 'Missing iban, bankName, or email for UK' });
->>>>>>> 2527d84c4eea1a9434f04b1aaf2b3155116ac55f
       }
-    } else {
-      return res.status(400).json({ error: 'Unsupported country' });
-    }
-
-    const sellerRef = doc(db, 'sellers', userId);
-    const sellerSnap = await getDoc(sellerRef);
-    const dataToUpdate = {
-      country,
-      bankCode: country === 'Nigeria' ? bankCode : '',
-      accountNumber: country === 'Nigeria' ? accountNumber : '',
-      iban: country === 'United Kingdom' ? iban : '',
-      email: country === 'United Kingdom' ? email : '',
-      updatedAt: serverTimestamp(),
-    };
-
-    // Fetch bank name for Nigeria if not provided
-    if (country === 'Nigeria' && !bankName) {
-      try {
-        const bankResponse = await axios.get('https://api.paystack.co/bank', {
+      const transferResponse = await axios.post(
+        'https://api.paystack.co/transfer',
+        {
+          source: 'balance',
+          amount: Math.round(amount * 100),
+          recipient: recipientCode,
+          reason: `Payout for transaction ${transactionId}`,
+        },
+        {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             'Content-Type': 'application/json',
           },
-        });
-        const bank = bankResponse.data.data.find(b => b.code === bankCode);
-        dataToUpdate.bankName = bank ? bank.name : 'Unknown Bank';
-      } catch (bankError) {
-        console.warn('Failed to fetch bank name, using default:', bankError.message);
-        dataToUpdate.bankName = 'Unknown Bank';
+        }
+      );
+      if (!transferResponse.data.status) {
+        throw new Error(`Paystack transfer failed: ${transferResponse.data.message}`);
       }
-    } else {
-      dataToUpdate.bankName = bankName || '';
+      await updateDoc(walletRef, {
+        pendingBalance: wallet.pendingBalance - amount,
+        availableBalance: wallet.availableBalance,
+        updatedAt: serverTimestamp(),
+      });
+      await updateDoc(transactionRef, {
+        status: 'Approved',
+        updatedAt: serverTimestamp(),
+      });
+      res.json({
+        status: 'success',
+        reference: transferResponse.data.data.reference,
+      });
+    } else if (updatedSeller.country === 'United Kingdom') {
+      const transfer = await stripe.transfers.create({
+        amount: Math.round(amount * 100),
+        currency: 'gbp',
+        destination: updatedSeller.stripeAccountId,
+        transfer_group: transactionId,
+      });
+      await updateDoc(walletRef, {
+        pendingBalance: wallet.pendingBalance - amount,
+        availableBalance: wallet.availableBalance,
+        updatedAt: serverTimestamp(),
+      });
+      await updateDoc(transactionRef, {
+        status: 'Approved',
+        updatedAt: serverTimestamp(),
+      });
+      res.json({
+        status: 'success',
+        transferId: transfer.id,
+      });
     }
-
-    // Use setDoc if document doesn't exist, fall back to updateDoc
-    if (!sellerSnap.exists()) {
-      await setDoc(sellerRef, {
-        ...dataToUpdate,
-        createdAt: serverTimestamp(),
-      }, { merge: true });
-    } else {
-      await updateDoc(sellerRef, dataToUpdate);
-    }
-
-    res.json({ status: 'success', message: 'Seller onboarded' });
   } catch (error) {
-    console.error('Onboarding error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to onboard seller', details: error.message || 'Unknown error' });
+    console.error('Payout approval error:', error);
+    res.status(500).json({ error: 'Failed to approve payout', details: error.message });
   }
 });
 
-<<<<<<< HEAD
-/**
- * @swagger
- * /reject-payout:
- *   post:
- *     summary: Reject seller payout
- *     description: Reject a seller payout request and return funds to available balance
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - sellerId
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: Transaction ID
- *                 example: "transaction123"
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *     responses:
- *       200:
- *         description: Payout rejected successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "Payout rejected and funds returned to available balance"
- *       400:
- *         description: Invalid request or transaction not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 // /reject-payout endpoint
 router.post('/reject-payout', async (req, res) => {
   try {
@@ -547,15 +315,6 @@ router.post('/reject-payout', async (req, res) => {
     console.error('Payout rejection error:', error);
     res.status(500).json({ error: 'Failed to reject payout', details: error.message });
   }
-=======
-// [Rest of the router code remains unchanged for now]
-router.post('/initiate-seller-payout', async (req, res) => {
-  // ... (unchanged)
->>>>>>> 2527d84c4eea1a9434f04b1aaf2b3155116ac55f
-});
-
-router.post('/approve-payout', async (req, res) => {
-  // ... (unchanged)
 });
 
 async function createRecipient(bankCode, accountNumber, name) {
