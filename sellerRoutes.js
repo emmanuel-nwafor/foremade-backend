@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const { doc, getDoc, setDoc, serverTimestamp } = require('firebase/firestore');
+const { doc, getDoc, setDoc, serverTimestamp, updateDoc } = require('firebase/firestore');
 const router = express.Router();
 
 // /onboard-seller endpoint
