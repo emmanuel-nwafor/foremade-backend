@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const { doc, getDoc, setDoc, serverTimestamp, updateDoc } = require('firebase/firestore');
+const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection } = require('firebase/firestore');
 const router = express.Router();
 
 /**
@@ -21,6 +21,7 @@ const router = express.Router();
  *             required:
  *               - userId
  *               - country
+ *               - fullName
  *             properties:
  *               userId:
  *                 type: string
@@ -31,6 +32,10 @@ const router = express.Router();
  *                 enum: [Nigeria, United Kingdom]
  *                 description: Seller's country
  *                 example: "Nigeria"
+ *               fullName:
+ *                 type: string
+ *                 description: Seller's full name
+ *                 example: "John Doe"
  *               bankCode:
  *                 type: string
  *                 description: Bank code (required for Nigeria)
@@ -52,6 +57,10 @@ const router = express.Router();
  *                 type: string
  *                 description: Bank name (required for UK)
  *                 example: "Barclays"
+ *               idNumber:
+ *                 type: string
+ *                 description: ID number (required for UK)
+ *                 example: "123456789"
  *     responses:
  *       200:
  *         description: Seller onboarded successfully
@@ -87,9 +96,9 @@ const router = express.Router();
  */
 router.post('/onboard-seller', async (req, res) => {
   try {
-    const { userId, bankCode, accountNumber, country, email, iban, bankName } = req.body;
-    if (!userId || !country) {
-      return res.status(400).json({ error: 'Missing userId or country' });
+    const { userId, fullName, bankCode, accountNumber, country, email, iban, bankName, idNumber } = req.body;
+    if (!userId || !country || !fullName) {
+      return res.status(400).json({ error: 'Missing userId, country, or fullName' });
     }
 
     if (country === 'Nigeria') {
@@ -106,13 +115,13 @@ router.post('/onboard-seller', async (req, res) => {
         }
       );
       if (!verifyResponse.data.status) {
-        throw new Error(`Failed to verify bank account: ${verifyResponse.data.message || 'Invalid details'}`);
+        return res.status(400).json({ error: `Failed to verify bank account: ${verifyResponse.data.message}` });
       }
       const recipientResponse = await axios.post(
         'https://api.paystack.co/transferrecipient',
         {
           type: 'nuban',
-          name: userId, // Use userId as a placeholder name
+          name: fullName,
           account_number: accountNumber,
           bank_code: bankCode,
           currency: 'NGN',
@@ -125,15 +134,22 @@ router.post('/onboard-seller', async (req, res) => {
         }
       );
       if (!recipientResponse.data.status) {
-        throw new Error(`Failed to create Paystack recipient: ${recipientResponse.data.message}`);
+        return res.status(400).json({ error: `Failed to create Paystack recipient: ${recipientResponse.data.message}` });
       }
       const recipientCode = recipientResponse.data.data.recipient_code;
       const sellerRef = doc(db, 'sellers', userId);
-      await updateDoc(sellerRef, { paystackRecipientCode: recipientCode, country });
+      await setDoc(sellerRef, {
+        fullName,
+        country,
+        bankCode,
+        accountNumber,
+        paystackRecipientCode: recipientCode,
+        createdAt: new Date().toISOString(),
+      }, { merge: true });
       res.json({ recipientCode });
     } else if (country === 'United Kingdom') {
-      if (!iban || !bankName || !email) {
-        return res.status(400).json({ error: 'Missing iban, bankName, or email for UK' });
+      if (!iban || !bankName || !email || !idNumber) {
+        return res.status(400).json({ error: 'Missing iban, bankName, email, or idNumber for UK' });
       }
       const account = await stripe.accounts.create({
         type: 'express',
@@ -147,8 +163,8 @@ router.post('/onboard-seller', async (req, res) => {
           object: 'bank_account',
           country: 'GB',
           currency: 'GBP',
-          account_number: iban.replace(/[^0-9]/g, ''), // Extract digits from IBAN
-          routing_number: bankName, // Simplified; adjust based on Stripe requirements
+          account_number: iban.replace(/[^0-9]/g, ''),
+          routing_number: '108800', // Example sort code; replace with actual sort code logic
         },
       });
 
@@ -160,7 +176,16 @@ router.post('/onboard-seller', async (req, res) => {
       });
 
       const sellerRef = doc(db, 'sellers', userId);
-      await updateDoc(sellerRef, { stripeAccountId: account.id, country });
+      await setDoc(sellerRef, {
+        fullName,
+        country,
+        idNumber,
+        bankName,
+        iban,
+        email,
+        stripeAccountId: account.id,
+        createdAt: new Date().toISOString(),
+      }, { merge: true });
       res.json({
         stripeAccountId: account.id,
         redirectUrl: accountLink.url,
@@ -190,7 +215,6 @@ router.post('/onboard-seller', async (req, res) => {
  *             required:
  *               - sellerId
  *               - amount
- *               - transactionReference
  *             properties:
  *               sellerId:
  *                 type: string
@@ -200,28 +224,6 @@ router.post('/onboard-seller', async (req, res) => {
  *                 type: number
  *                 description: Payout amount
  *                 example: 50000
- *               transactionReference:
- *                 type: string
- *                 description: Unique transaction reference
- *                 example: "TXN_1234567890"
- *               bankCode:
- *                 type: string
- *                 description: Bank code (for Nigeria)
- *                 example: "044"
- *               accountNumber:
- *                 type: string
- *                 description: Account number (for Nigeria)
- *                 example: "0123456789"
- *               country:
- *                 type: string
- *                 enum: [Nigeria, United Kingdom]
- *                 description: Seller's country
- *                 example: "Nigeria"
- *               email:
- *                 type: string
- *                 format: email
- *                 description: Email address (for UK)
- *                 example: "seller@example.com"
  *     responses:
  *       200:
  *         description: Payout initiated successfully
@@ -255,9 +257,9 @@ router.post('/onboard-seller', async (req, res) => {
  */
 router.post('/initiate-seller-payout', async (req, res) => {
   try {
-    const { sellerId, amount, transactionReference, bankCode, accountNumber, country, email } = req.body;
-    if (!sellerId || !amount || amount <= 0 || !transactionReference) {
-      return res.status(400).json({ error: 'Missing sellerId, amount, or transactionReference' });
+    const { sellerId, amount } = req.body;
+    if (!sellerId || !amount || amount <= 0) {
+      return res.status(400).json({ error: 'Missing sellerId or amount' });
     }
 
     const walletRef = doc(db, 'wallets', sellerId);
@@ -271,6 +273,14 @@ router.post('/initiate-seller-payout', async (req, res) => {
       return res.status(400).json({ error: 'Insufficient available balance' });
     }
 
+    const sellerRef = doc(db, 'sellers', sellerId);
+    const sellerSnap = await getDoc(sellerRef);
+    if (!sellerSnap.exists()) {
+      return res.status(400).json({ error: 'Seller not found' });
+    }
+    const seller = sellerSnap.data();
+    const transactionReference = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     await updateDoc(walletRef, {
       availableBalance: wallet.availableBalance - amount,
       pendingBalance: (wallet.pendingBalance || 0) + amount,
@@ -280,16 +290,14 @@ router.post('/initiate-seller-payout', async (req, res) => {
     const transactionDoc = await addDoc(collection(db, 'transactions'), {
       userId: sellerId,
       type: 'Withdrawal',
-      description: `Withdrawal request for transaction ${transactionReference} - Awaiting Admin Approval`,
+      description: `Withdrawal request for ${transactionReference} - Awaiting Admin Approval`,
       amount,
       date: new Date().toISOString().split('T')[0],
       status: 'Pending',
       createdAt: serverTimestamp(),
       reference: transactionReference,
-      bankCode: country === 'Nigeria' ? bankCode : undefined,
-      accountNumber: country === 'Nigeria' ? accountNumber : undefined,
-      country,
-      email,
+      country: seller.country,
+      paystackRecipientCode: seller.paystackRecipientCode,
     });
 
     res.json({
@@ -308,7 +316,7 @@ router.post('/initiate-seller-payout', async (req, res) => {
  * /approve-payout:
  *   post:
  *     summary: Approve seller payout
- *     description: Approve and process a seller payout request
+ *     description: Approve and process a seller payout request with real-time crediting
  *     tags: [Seller Management]
  *     requestBody:
  *       required: true
@@ -347,10 +355,9 @@ router.post('/initiate-seller-payout', async (req, res) => {
  *                   type: string
  *                   description: Stripe transfer ID (UK)
  *                   example: "tr_1234567890"
- *                 redirectUrl:
+ *                 message:
  *                   type: string
- *                   description: Stripe onboarding URL (if needed)
- *                   example: "https://connect.stripe.com/setup/s/1234567890"
+ *                   example: "Payout processed and credited to seller account"
  *       400:
  *         description: Invalid request or transaction not found
  *         content:
@@ -398,33 +405,8 @@ router.post('/approve-payout', async (req, res) => {
     }
     const seller = sellerSnap.data();
 
-    if (!seller.paystackRecipientCode && transaction.country === 'Nigeria') {
-      const onboardingResponse = await axios.post('http://localhost:5000/api/onboard-seller', {
-        userId: sellerId,
-        bankCode: transaction.bankCode,
-        accountNumber: transaction.accountNumber,
-        country: transaction.country,
-      });
-      if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
-    } else if (!seller.stripeAccountId && transaction.country === 'United Kingdom') {
-      const onboardingResponse = await axios.post('http://localhost:5000/api/onboard-seller', {
-        userId: sellerId,
-        country: transaction.country,
-        email: transaction.email,
-      });
-      if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
-      return res.json({
-        status: 'redirect',
-        redirectUrl: onboardingResponse.data.redirectUrl,
-      });
-    }
-
-    const updatedSellerSnap = await getDoc(sellerRef);
-    const updatedSeller = updatedSellerSnap.data();
-
-    if (updatedSeller.country === 'Nigeria') {
-      const recipientCode = updatedSeller.paystackRecipientCode;
-      if (!recipientCode) {
+    if (seller.country === 'Nigeria') {
+      if (!seller.paystackRecipientCode) {
         return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
       }
       const transferResponse = await axios.post(
@@ -432,7 +414,7 @@ router.post('/approve-payout', async (req, res) => {
         {
           source: 'balance',
           amount: Math.round(amount * 100), // Convert to kobo
-          recipient: recipientCode,
+          recipient: seller.paystackRecipientCode,
           reason: `Payout for transaction ${transactionId}`,
         },
         {
@@ -453,16 +435,18 @@ router.post('/approve-payout', async (req, res) => {
       await updateDoc(transactionRef, {
         status: 'Approved',
         updatedAt: serverTimestamp(),
+        transferReference: transferResponse.data.data.reference,
       });
       res.json({
         status: 'success',
         reference: transferResponse.data.data.reference,
+        message: 'Payout processed and credited to seller account in real-time',
       });
-    } else if (updatedSeller.country === 'United Kingdom') {
+    } else if (seller.country === 'United Kingdom') {
       const transfer = await stripe.transfers.create({
         amount: Math.round(amount * 100), // Convert to cents
         currency: 'gbp',
-        destination: updatedSeller.stripeAccountId,
+        destination: seller.stripeAccountId,
         transfer_group: transactionId,
       });
       await updateDoc(walletRef, {
@@ -477,6 +461,7 @@ router.post('/approve-payout', async (req, res) => {
       res.json({
         status: 'success',
         transferId: transfer.id,
+        message: 'Payout processed and credited to seller account',
       });
     }
   } catch (error) {
@@ -586,7 +571,26 @@ router.post('/reject-payout', async (req, res) => {
 });
 
 async function createRecipient(bankCode, accountNumber, name) {
-  // ... (unchanged)
+  const response = await axios.post(
+    'https://api.paystack.co/transferrecipient',
+    {
+      type: 'nuban',
+      name,
+      account_number: accountNumber,
+      bank_code: bankCode,
+      currency: 'NGN',
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  if (!response.data.status) {
+    throw new Error('Failed to create transfer recipient');
+  }
+  return response.data.data.recipient_code;
 }
 
 module.exports = router;
