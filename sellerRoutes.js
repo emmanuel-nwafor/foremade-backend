@@ -164,7 +164,7 @@ router.post('/onboard-seller', async (req, res) => {
           country: 'GB',
           currency: 'GBP',
           account_number: iban.replace(/[^0-9]/g, ''),
-          routing_number: '108800', // Example sort code; replace with actual sort code logic
+          routing_number: '108800',
         },
       });
 
@@ -201,10 +201,99 @@ router.post('/onboard-seller', async (req, res) => {
 
 /**
  * @swagger
+ * /complete-purchase:
+ *   post:
+ *     summary: Complete a purchase and credit seller
+ *     description: Process a purchase and credit the seller's available balance
+ *     tags: [Seller Management]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - sellerId
+ *               - amount
+ *               - productPrice
+ *             properties:
+ *               sellerId:
+ *                 type: string
+ *                 description: Seller ID
+ *                 example: "seller123"
+ *               amount:
+ *                 type: number
+ *                 description: Total purchase amount
+ *                 example: 11000
+ *               productPrice:
+ *                 type: number
+ *                 description: Original product price
+ *                 example: 10000
+ *     responses:
+ *       200:
+ *         description: Purchase completed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Purchase completed, seller credited"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/complete-purchase', async (req, res) => {
+  try {
+    const { sellerId, amount, productPrice } = req.body;
+    if (!sellerId || !amount || !productPrice) {
+      return res.status(400).json({ error: 'Missing sellerId, amount, or productPrice' });
+    }
+
+    const fees = amount - productPrice;
+    const sellerEarnings = productPrice;
+
+    const walletRef = doc(db, 'wallets', sellerId);
+    await updateDoc(walletRef, {
+      availableBalance: firebase.firestore.FieldValue.increment(sellerEarnings),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    await addDoc(collection(db, 'transactions'), {
+      userId: sellerId,
+      type: 'Sale',
+      amount: sellerEarnings,
+      fees,
+      status: 'Completed',
+      createdAt: serverTimestamp(),
+    });
+
+    res.json({ status: 'success', message: 'Purchase completed, seller credited' });
+  } catch (error) {
+    console.error('Purchase error:', error);
+    res.status(500).json({ error: 'Failed to complete purchase', details: error.message });
+  }
+});
+
+/**
+ * @swagger
  * /initiate-seller-payout:
  *   post:
  *     summary: Initiate seller payout
- *     description: Initiate a payout request for a seller
+ *     description: Initiate a payout request for a seller without altering balance
  *     tags: [Seller Management]
  *     requestBody:
  *       required: true
@@ -280,12 +369,6 @@ router.post('/initiate-seller-payout', async (req, res) => {
     }
     const seller = sellerSnap.data();
     const transactionReference = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    await updateDoc(walletRef, {
-      availableBalance: wallet.availableBalance - amount,
-      pendingBalance: (wallet.pendingBalance || 0) + amount,
-      updatedAt: serverTimestamp(),
-    });
 
     const transactionDoc = await addDoc(collection(db, 'transactions'), {
       userId: sellerId,
@@ -380,13 +463,8 @@ router.post('/approve-payout', async (req, res) => {
 
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists()) {
-      return res.status(400).json({ error: 'Transaction not found' });
-    }
-    const transaction = transactionSnap.data();
-
-    if (transaction.status !== 'Pending') {
-      return res.status(400).json({ error: 'Transaction is not in pending state' });
+    if (!transactionSnap.exists() || transactionSnap.data().status !== 'Pending') {
+      return res.status(400).json({ error: 'Invalid or non-pending transaction' });
     }
 
     const walletRef = doc(db, 'wallets', sellerId);
@@ -395,43 +473,40 @@ router.post('/approve-payout', async (req, res) => {
       return res.status(400).json({ error: 'Wallet not found' });
     }
     const wallet = walletSnap.data();
+    const amount = transactionSnap.data().amount;
 
-    const amount = transaction.amount;
+    if (wallet.availableBalance < amount) {
+      return res.status(400).json({ error: 'Insufficient available balance for payout' });
+    }
 
     const sellerRef = doc(db, 'sellers', sellerId);
     const sellerSnap = await getDoc(sellerRef);
-    if (!sellerSnap.exists()) {
-      return res.status(400).json({ error: 'Seller not found' });
+    if (!sellerSnap.exists() || !sellerSnap.data().paystackRecipientCode) {
+      return res.status(400).json({ error: 'Seller not onboarded' });
     }
-    const seller = sellerSnap.data();
+    const recipientCode = sellerSnap.data().paystackRecipientCode;
 
-    if (seller.country === 'Nigeria') {
-      if (!seller.paystackRecipientCode) {
-        return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
-      }
-      const transferResponse = await axios.post(
-        'https://api.paystack.co/transfer',
-        {
-          source: 'balance',
-          amount: Math.round(amount * 100), // Convert to kobo
-          recipient: seller.paystackRecipientCode,
-          reason: `Payout for transaction ${transactionId}`,
+    const transferResponse = await axios.post(
+      'https://api.paystack.co/transfer',
+      {
+        source: 'balance',
+        amount: Math.round(amount * 100),
+        recipient: recipientCode,
+        reason: `Withdrawal approval for ${transactionId}`,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json',
         },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      if (!transferResponse.data.status) {
-        throw new Error(`Paystack transfer failed: ${transferResponse.data.message}`);
       }
+    );
+
+    if (transferResponse.data.status) {
       await updateDoc(walletRef, {
-        pendingBalance: wallet.pendingBalance - amount,
-        availableBalance: wallet.availableBalance,
+        availableBalance: wallet.availableBalance - amount,
         updatedAt: serverTimestamp(),
-      });
+      }, { merge: true });
       await updateDoc(transactionRef, {
         status: 'Approved',
         updatedAt: serverTimestamp(),
@@ -442,27 +517,8 @@ router.post('/approve-payout', async (req, res) => {
         reference: transferResponse.data.data.reference,
         message: 'Payout processed and credited to seller account in real-time',
       });
-    } else if (seller.country === 'United Kingdom') {
-      const transfer = await stripe.transfers.create({
-        amount: Math.round(amount * 100), // Convert to cents
-        currency: 'gbp',
-        destination: seller.stripeAccountId,
-        transfer_group: transactionId,
-      });
-      await updateDoc(walletRef, {
-        pendingBalance: wallet.pendingBalance - amount,
-        availableBalance: wallet.availableBalance,
-        updatedAt: serverTimestamp(),
-      });
-      await updateDoc(transactionRef, {
-        status: 'Approved',
-        updatedAt: serverTimestamp(),
-      });
-      res.json({
-        status: 'success',
-        transferId: transfer.id,
-        message: 'Payout processed and credited to seller account',
-      });
+    } else {
+      throw new Error(transferResponse.data.message || 'Transfer failed');
     }
   } catch (error) {
     console.error('Payout approval error:', error);
@@ -475,7 +531,7 @@ router.post('/approve-payout', async (req, res) => {
  * /reject-payout:
  *   post:
  *     summary: Reject seller payout
- *     description: Reject a seller payout request and return funds to available balance
+ *     description: Reject a seller payout request
  *     tags: [Seller Management]
  *     requestBody:
  *       required: true
@@ -508,7 +564,7 @@ router.post('/approve-payout', async (req, res) => {
  *                   example: "success"
  *                 message:
  *                   type: string
- *                   example: "Payout rejected and funds returned to available balance"
+ *                   example: "Payout rejected"
  *       400:
  *         description: Invalid request or transaction not found
  *         content:
@@ -531,29 +587,9 @@ router.post('/reject-payout', async (req, res) => {
 
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists()) {
-      return res.status(400).json({ error: 'Transaction not found' });
+    if (!transactionSnap.exists() || transactionSnap.data().status !== 'Pending') {
+      return res.status(400).json({ error: 'Invalid or non-pending transaction' });
     }
-    const transaction = transactionSnap.data();
-
-    if (transaction.status !== 'Pending') {
-      return res.status(400).json({ error: 'Transaction is not in pending state' });
-    }
-
-    const walletRef = doc(db, 'wallets', sellerId);
-    const walletSnap = await getDoc(walletRef);
-    if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet not found' });
-    }
-    const wallet = walletSnap.data();
-
-    const amount = transaction.amount;
-
-    await updateDoc(walletRef, {
-      availableBalance: wallet.availableBalance + amount,
-      pendingBalance: wallet.pendingBalance - amount,
-      updatedAt: serverTimestamp(),
-    });
 
     await updateDoc(transactionRef, {
       status: 'Rejected',
@@ -562,7 +598,7 @@ router.post('/reject-payout', async (req, res) => {
 
     res.json({
       status: 'success',
-      message: 'Payout rejected and funds returned to available balance',
+      message: 'Payout rejected',
     });
   } catch (error) {
     console.error('Payout rejection error:', error);
