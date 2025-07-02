@@ -316,6 +316,7 @@ router.post('/complete-purchase', async (req, res) => {
  *     responses:
  *       200:
  *         description: Payout initiated successfully
+ * 
  *         content:
  *           application/json:
  *             schema:
