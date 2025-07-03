@@ -482,11 +482,16 @@ router.post('/approve-payout', async (req, res) => {
 
     const sellerRef = doc(db, 'sellers', sellerId);
     const sellerSnap = await getDoc(sellerRef);
-    if (!sellerSnap.exists() || !sellerSnap.data().paystackRecipientCode) {
-      return res.status(400).json({ error: 'Seller not onboarded' });
+    if (!sellerSnap.exists()) {
+      return res.status(400).json({ error: 'Seller not found' });
     }
-    const recipientCode = sellerSnap.data().paystackRecipientCode;
+    const sellerData = sellerSnap.data();
+    const recipientCode = sellerData.paystackRecipientCode;
+    if (!recipientCode || typeof recipientCode !== 'string' || !recipientCode.startsWith('RCP_')) {
+      return res.status(400).json({ error: 'Invalid or missing Paystack recipient code' });
+    }
 
+    console.log('Initiating transfer:', { amount, recipientCode, sellerId }); // Debug log
     const transferResponse = await axios.post(
       'https://api.paystack.co/transfer',
       {
@@ -522,8 +527,8 @@ router.post('/approve-payout', async (req, res) => {
       throw new Error(transferResponse.data.message || 'Transfer failed');
     }
   } catch (error) {
-    console.error('Payout approval error:', error);
-    res.status(500).json({ error: 'Failed to approve payout', details: error.message });
+    console.error('Payout approval error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to approve payout', details: error.response?.data?.message || error.message });
   }
 });
 
