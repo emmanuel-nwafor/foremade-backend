@@ -316,7 +316,6 @@ router.post('/complete-purchase', async (req, res) => {
  *     responses:
  *       200:
  *         description: Payout initiated successfully
- * 
  *         content:
  *           application/json:
  *             schema:
@@ -435,10 +434,6 @@ router.post('/initiate-seller-payout', async (req, res) => {
  *                   type: string
  *                   description: Transfer reference (Nigeria)
  *                   example: "TRF_1234567890"
- *                 transferId:
- *                   type: string
- *                   description: Stripe transfer ID (UK)
- *                   example: "tr_1234567890"
  *                 message:
  *                   type: string
  *                   example: "Payout processed and credited to seller account"
@@ -491,7 +486,19 @@ router.post('/approve-payout', async (req, res) => {
       return res.status(400).json({ error: 'Invalid or missing Paystack recipient code' });
     }
 
-    console.log('Initiating transfer:', { amount, recipientCode, sellerId }); // Debug log
+    // Check Paystack balance
+    const balanceResponse = await axios.get('https://api.paystack.co/balance', {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    const availableBalance = balanceResponse.data.data[0].balance / 100; // Convert kobo to NGN
+    if (availableBalance < amount) {
+      return res.status(400).json({ error: 'Insufficient Paystack balance for transfer' });
+    }
+
+    console.log('Initiating transfer:', { amount, recipientCode, sellerId });
     const transferResponse = await axios.post(
       'https://api.paystack.co/transfer',
       {
@@ -499,32 +506,61 @@ router.post('/approve-payout', async (req, res) => {
         amount: Math.round(amount * 100),
         recipient: recipientCode,
         reason: `Withdrawal approval for ${transactionId}`,
+        metadata: { transactionId }, // Add metadata for webhook
       },
       {
         headers: {
           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
           'Content-Type': 'application/json',
         },
+        timeout: 15000,
       }
     );
 
     if (transferResponse.data.status) {
-      await updateDoc(walletRef, {
-        availableBalance: wallet.availableBalance - amount,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-      await updateDoc(transactionRef, {
-        status: 'Approved',
-        updatedAt: serverTimestamp(),
-        transferReference: transferResponse.data.data.reference,
-      });
-      res.json({
-        status: 'success',
-        reference: transferResponse.data.data.reference,
-        message: 'Payout processed and credited to seller account in real-time',
-      });
+      // Verify transfer status immediately
+      const verifyResponse = await axios.get(
+        `https://api.paystack.co/transfer/verify/${transferResponse.data.data.reference}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (verifyResponse.data.data.status === 'success') {
+        await updateDoc(walletRef, {
+          availableBalance: wallet.availableBalance - amount,
+          updatedAt: serverTimestamp(),
+        });
+        await updateDoc(transactionRef, {
+          status: 'Approved',
+          updatedAt: serverTimestamp(),
+          transferReference: transferResponse.data.data.reference,
+        });
+        res.json({
+          status: 'success',
+          reference: transferResponse.data.data.reference,
+          message: 'Payout processed and credited to seller account in real-time',
+        });
+      } else {
+        await updateDoc(transactionRef, {
+          status: 'Pending',
+          updatedAt: serverTimestamp(),
+          transferReference: transferResponse.data.data.reference,
+          transferStatus: verifyResponse.data.data.status,
+        });
+        // Start polling as a fallback
+        pollTransferStatus(transferResponse.data.data.reference, transactionId);
+        res.json({
+          status: 'success',
+          reference: transferResponse.data.data.reference,
+          message: 'Payout initiated, awaiting bank confirmation',
+        });
+      }
     } else {
-      throw new Error(transferResponse.data.message || 'Transfer failed');
+      throw new Error(transferResponse.data.message || 'Transfer initiation failed');
     }
   } catch (error) {
     console.error('Payout approval error:', error.response?.data || error.message);
@@ -612,6 +648,103 @@ router.post('/reject-payout', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /paystack-webhook:
+ *   post:
+ *     summary: Handle Paystack webhook events
+ *     description: Process Paystack webhook events for transfer updates
+ *     tags: [Seller Management]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               event:
+ *                 type: string
+ *                 description: Webhook event type
+ *                 example: "transfer.success"
+ *               data:
+ *                 type: object
+ *                 description: Event data
+ *                 example:
+ *                   reference: "TRF_1234567890"
+ *                   metadata:
+ *                     transactionId: "transaction123"
+ *                   status: "success"
+ *                   reason: "Transfer completed"
+ *     responses:
+ *       200:
+ *         description: Webhook processed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Webhook received"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/paystack-webhook', async (req, res) => {
+  try {
+    const event = req.body;
+    const signature = req.headers['x-paystack-signature'];
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+
+    // Verify webhook signature
+    const crypto = require('crypto');
+    const hmac = crypto.createHmac('sha512', secret);
+    const expectedSignature = hmac.update(JSON.stringify(event)).digest('hex');
+    if (signature !== expectedSignature) {
+      console.error('Invalid webhook signature:', { received: signature, expected: expectedSignature });
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
+
+    console.log('Received Paystack webhook:', event);
+
+    if (event.event === 'transfer.success') {
+      const transactionRef = doc(db, 'transactions', event.data.metadata.transactionId);
+      const transactionSnap = await getDoc(transactionRef);
+      if (transactionSnap.exists()) {
+        await updateDoc(transactionRef, {
+          status: 'Approved',
+          updatedAt: serverTimestamp(),
+          transferReference: event.data.reference,
+        });
+        console.log(`Transfer ${event.data.reference} succeeded for transaction ${event.data.metadata.transactionId}`);
+      }
+    } else if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
+      const transactionRef = doc(db, 'transactions', event.data.metadata.transactionId);
+      const transactionSnap = await getDoc(transactionRef);
+      if (transactionSnap.exists()) {
+        await updateDoc(transactionRef, {
+          status: 'Failed',
+          updatedAt: serverTimestamp(),
+          transferReference: event.data.reference,
+          failureReason: event.data.reason,
+        });
+        console.log(`Transfer ${event.data.reference} failed for transaction ${event.data.metadata.transactionId}: ${event.data.reason}`);
+      }
+    }
+
+    res.status(200).json({ status: 'success', message: 'Webhook received' });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(500).json({ error: 'Failed to process webhook', details: error.message });
+  }
+});
+
 async function createRecipient(bankCode, accountNumber, name) {
   const response = await axios.post(
     'https://api.paystack.co/transferrecipient',
@@ -633,6 +766,42 @@ async function createRecipient(bankCode, accountNumber, name) {
     throw new Error('Failed to create transfer recipient');
   }
   return response.data.data.recipient_code;
+}
+
+async function pollTransferStatus(reference, transactionId, maxAttempts = 5, interval = 30000) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const verifyResponse = await axios.get(
+        `https://api.paystack.co/transfer/verify/${reference}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      if (verifyResponse.data.data.status === 'success') {
+        const transactionRef = doc(db, 'transactions', transactionId);
+        await updateDoc(transactionRef, {
+          status: 'Approved',
+          updatedAt: serverTimestamp(),
+        });
+        return true;
+      } else if (verifyResponse.data.data.status === 'failed') {
+        const transactionRef = doc(db, 'transactions', transactionId);
+        await updateDoc(transactionRef, {
+          status: 'Failed',
+          updatedAt: serverTimestamp(),
+          failureReason: verifyResponse.data.data.gateway_response,
+        });
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    } catch (error) {
+      console.error('Polling error:', error);
+    }
+  }
+  return false;
 }
 
 module.exports = router;
