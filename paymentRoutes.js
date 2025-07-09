@@ -5,6 +5,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 const router = express.Router();
+const emailService = require('./emailService');
 
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 
@@ -392,6 +393,23 @@ router.get('/payment-callback', async (req, res) => {
         status: 'completed',
         updatedAt: serverTimestamp(),
       });
+      // Send order confirmation email (simple)
+      try {
+        // Fetch order details for email
+        const orderRef = doc(db, 'orders', reference);
+        const orderSnap = await getDoc(orderRef);
+        if (orderSnap.exists()) {
+          const orderData = orderSnap.data();
+          // Use orderData.email and orderData.orderNumber (or reference)
+          await emailService.sendOrderConfirmationSimpleEmail({
+            email: orderData.email,
+            orderNumber: reference,
+            name: orderData.name || undefined
+          });
+        }
+      } catch (emailErr) {
+        console.error('Failed to send order confirmation email:', emailErr);
+      }
       res.redirect('/order-confirmation?success=true');
     } else {
       res.redirect(`/checkout?error=${encodeURIComponent(response.data.error)}`);

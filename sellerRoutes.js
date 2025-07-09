@@ -195,6 +195,48 @@ router.post('/onboard-seller', async (req, res) => {
     } else {
       return res.status(400).json({ error: 'Unsupported country' });
     }
+
+    const sellerRef = doc(db, 'sellers', userId);
+    const sellerSnap = await getDoc(sellerRef);
+    const dataToUpdate = {
+      country,
+      bankCode: country === 'Nigeria' ? bankCode : '',
+      accountNumber: country === 'Nigeria' ? accountNumber : '',
+      iban: country === 'United Kingdom' ? iban : '',
+      email: country === 'United Kingdom' ? email : '',
+      updatedAt: serverTimestamp(),
+    };
+
+    // Fetch bank name for Nigeria if not provided
+    if (country === 'Nigeria' && !bankName) {
+      try {
+        const bankResponse = await axios.get('https://api.paystack.co/bank', {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        const bank = bankResponse.data.data.find(b => b.code === bankCode);
+        dataToUpdate.bankName = bank ? bank.name : 'Unknown Bank';
+      } catch (bankError) {
+        console.warn('Failed to fetch bank name, using default:', bankError.message);
+        dataToUpdate.bankName = 'Unknown Bank';
+      }
+    } else {
+      dataToUpdate.bankName = bankName || '';
+    }
+
+    // Use setDoc if document doesn't exist, fall back to updateDoc
+    if (!sellerSnap.exists()) {
+      await setDoc(sellerRef, {
+        ...dataToUpdate,
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+    } else {
+      await updateDoc(sellerRef, dataToUpdate);
+    }
+
+    res.json({ status: 'success', message: 'Seller onboarded' });
   } catch (error) {
     console.error('Onboarding error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to onboard seller', details: error.message || 'Unknown error' });
@@ -456,96 +498,66 @@ router.post('/approve-payout', async (req, res) => {
         return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
       }
     } else if (updatedSeller.country === 'United Kingdom') {
-      const recipientCode = updatedSeller.paystackRecipientCode;
-      if (!recipientCode) {
-        return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
+      const stripeAccountId = updatedSeller.stripeAccountId;
+      if (!stripeAccountId) {
+        return res.status(400).json({ error: 'Seller has not completed Stripe onboarding' });
       }
     }
 
-    const recipientCode = updatedSeller.paystackRecipientCode;
-    if (!recipientCode || typeof recipientCode !== 'string' || !recipientCode.startsWith('RCP_')) {
-      return res.status(400).json({ error: 'Invalid or missing Paystack recipient code' });
-    }
+    const recipientCode = updatedSeller.paystackRecipientCode || updatedSeller.stripeAccountId;
 
-    // Check Paystack balance
-    const balanceResponse = await axios.get('https://api.paystack.co/balance', {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    const availableBalance = balanceResponse.data.data[0].balance / 100; // Convert kobo to NGN
-    if (availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient Paystack balance for transfer' });
-    }
-
-    console.log('Initiating transfer:', { amount, recipientCode, sellerId });
-    const transferResponse = await axios.post(
-      'https://api.paystack.co/transfer',
-      {
-        source: 'balance',
-        amount: Math.round(amount * 100),
-        recipient: recipientCode,
-        reason: `Withdrawal approval for ${transactionId}`,
-        metadata: { transactionId }, // Add metadata for webhook
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 15000,
+    if (country === 'Nigeria') {
+      const recipient = await createRecipient(bankCode, accountNumber, updatedSeller.bankName);
+      if (recipient.error) {
+        throw new Error(`Failed to create Paystack recipient: ${recipient.error}`);
       }
-    );
-
-    if (transferResponse.data.status) {
-      // Verify transfer status immediately
-      const verifyResponse = await axios.get(
-        `https://api.paystack.co/transfer/verify/${transferResponse.data.data.reference}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (verifyResponse.data.data.status === 'success') {
-        await updateDoc(walletRef, {
-          availableBalance: wallet.availableBalance - amount,
-          updatedAt: serverTimestamp(),
-        });
-        await updateDoc(transactionRef, {
-          status: 'Approved',
-          updatedAt: serverTimestamp(),
-          transferReference: transferResponse.data.data.reference,
-        });
-        res.json({
-          status: 'success',
-          reference: transferResponse.data.data.reference,
-          message: 'Payout processed and credited to seller account in real-time',
-        });
-      } else {
-        await updateDoc(transactionRef, {
-          status: 'Pending',
-          updatedAt: serverTimestamp(),
-          transferReference: transferResponse.data.data.reference,
-          transferStatus: verifyResponse.data.data.status,
-        });
-        // Start polling as a fallback
-        pollTransferStatus(transferResponse.data.data.reference, transactionId);
-        res.json({
-          status: 'success',
-          reference: transferResponse.data.data.reference,
-          message: 'Payout initiated, awaiting bank confirmation',
-        });
-      }
-    } else {
-      throw new Error(transferResponse.data.message || 'Transfer initiation failed');
+      const transfer = await stripe.transfers.create({
+        amount: amount * 100, // Stripe uses cents
+        currency: 'gbp', // Assuming GBP for UK transfers
+        destination: recipient.recipient_code,
+        transfer_group: transactionDoc.id, // Link to the transaction
+      });
+      await updateDoc(transactionRef, {
+        status: 'Approved',
+        transferId: transfer.id,
+        updatedAt: serverTimestamp(),
+      });
+      await updateDoc(walletRef, {
+        availableBalance: wallet.availableBalance - amount,
+        pendingBalance: wallet.pendingBalance - amount,
+        updatedAt: serverTimestamp(),
+      });
+      res.json({
+        status: 'success',
+        reference: transfer.transfer_group, // Use transactionId as reference
+        transferId: transfer.id,
+      });
+    } else if (country === 'United Kingdom') {
+      const transfer = await stripe.transfers.create({
+        amount: amount * 100, // Stripe uses cents
+        currency: 'gbp', // Assuming GBP for UK transfers
+        destination: stripeAccountId,
+        transfer_group: transactionDoc.id, // Link to the transaction
+      });
+      await updateDoc(transactionRef, {
+        status: 'Approved',
+        transferId: transfer.id,
+        updatedAt: serverTimestamp(),
+      });
+      await updateDoc(walletRef, {
+        availableBalance: wallet.availableBalance - amount,
+        pendingBalance: wallet.pendingBalance - amount,
+        updatedAt: serverTimestamp(),
+      });
+      res.json({
+        status: 'success',
+        reference: transfer.transfer_group, // Use transactionId as reference
+        transferId: transfer.id,
+      });
     }
   } catch (error) {
-    console.error('Payout approval error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to approve payout', details: error.response?.data?.message || error.message });
+    console.error('Payout approval error:', error);
+    res.status(500).json({ error: 'Failed to approve seller payout', details: error.message });
   }
 });
 
@@ -1078,124 +1090,25 @@ router.post('/reject-payout', async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /paystack-webhook:
- *   post:
- *     summary: Handle Paystack webhook events
- *     description: Process Paystack webhook events for transfer updates
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               event:
- *                 type: string
- *                 description: Webhook event type
- *                 example: "transfer.success"
- *               data:
- *                 type: object
- *                 description: Event data
- *                 example:
- *                   reference: "TRF_1234567890"
- *                   metadata:
- *                     transactionId: "transaction123"
- *                   status: "success"
- *                   reason: "Transfer completed"
- *     responses:
- *       200:
- *         description: Webhook processed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "Webhook received"
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.post('/paystack-webhook', async (req, res) => {
-  try {
-    const event = req.body;
-    const signature = req.headers['x-paystack-signature'];
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-
-    // Verify webhook signature
-    const crypto = require('crypto');
-    const hmac = crypto.createHmac('sha512', secret);
-    const expectedSignature = hmac.update(JSON.stringify(event)).digest('hex');
-    if (signature !== expectedSignature) {
-      console.error('Invalid webhook signature:', { received: signature, expected: expectedSignature });
-      return res.status(400).json({ error: 'Invalid webhook signature' });
-    }
-
-    console.log('Received Paystack webhook:', event);
-
-    if (event.event === 'transfer.success') {
-      const transactionRef = doc(db, 'transactions', event.data.metadata.transactionId);
-      const transactionSnap = await getDoc(transactionRef);
-      if (transactionSnap.exists()) {
-        await updateDoc(transactionRef, {
-          status: 'Approved',
-          updatedAt: serverTimestamp(),
-          transferReference: event.data.reference,
-        });
-        console.log(`Transfer ${event.data.reference} succeeded for transaction ${event.data.metadata.transactionId}`);
-      }
-    } else if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
-      const transactionRef = doc(db, 'transactions', event.data.metadata.transactionId);
-      const transactionSnap = await getDoc(transactionRef);
-      if (transactionSnap.exists()) {
-        await updateDoc(transactionRef, {
-          status: 'Failed',
-          updatedAt: serverTimestamp(),
-          transferReference: event.data.reference,
-          failureReason: event.data.reason,
-        });
-        console.log(`Transfer ${event.data.reference} failed for transaction ${event.data.metadata.transactionId}: ${event.data.reason}`);
-      }
-    }
-
-    res.status(200).json({ status: 'success', message: 'Webhook received' });
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(500).json({ error: 'Failed to process webhook', details: error.message });
-  }
-});
-
 async function createRecipient(bankCode, accountNumber, name) {
-  const response = await axios.post(
-    'https://api.paystack.co/transferrecipient',
-    {
-      type: 'nuban',
-      name,
-      account_number: accountNumber,
-      bank_code: bankCode,
-      currency: 'NGN',
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
+  try {
+    const recipient = await stripe.recipients.create({
+      type: 'corporate',
+      bank_account: {
+        country: 'GB',
+        currency: 'gbp',
+        account_holder_name: name,
+        account_number: accountNumber,
+        sort_code: bankCode,
       },
-    }
-  );
-  if (!response.data.status) {
-    throw new Error('Failed to create transfer recipient');
+      email: 'info@example.com', // Replace with a valid email
+      description: `Payout for transaction ${accountNumber}`,
+    });
+    return { recipient_code: recipient.id };
+  } catch (error) {
+    console.error('Failed to create Paystack recipient:', error);
+    return { error: error.message };
   }
-  return response.data.data.recipient_code;
 }
 
 async function pollTransferStatus(reference, transactionId, maxAttempts = 5, interval = 30000) {
