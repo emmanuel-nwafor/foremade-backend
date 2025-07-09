@@ -590,4 +590,157 @@ router.post('/api/youth-empowerment', async (req, res) => {
   }
 });
 
+// /send-seller-order-notification endpoint
+router.post('/send-seller-order-notification', async (req, res) => {
+  try {
+    const { orderId, sellerId, items, total, currency, shippingDetails } = req.body;
+    console.log('Received payload for seller order notification:', {
+      orderId,
+      sellerId,
+      items,
+      total,
+      currency,
+      shippingDetails,
+      payload: JSON.stringify(req.body, null, 2),
+    });
+
+    // Validate required fields
+    if (!orderId || !sellerId || !items || !total || !currency || !shippingDetails) {
+      console.warn('Missing required fields:', { orderId, sellerId, items, total, currency, shippingDetails });
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      console.warn('Invalid items array:', items);
+      return res.status(400).json({ error: 'Items must be a non-empty array' });
+    }
+    if (typeof total !== 'number' || total <= 0) {
+      console.warn('Invalid total amount:', total);
+      return res.status(400).json({ error: 'Total must be a positive number' });
+    }
+    if (!['ngn', 'gbp'].includes(currency?.toLowerCase())) {
+      console.warn('Invalid currency:', currency);
+      return res.status(400).json({ error: 'Invalid currency' });
+    }
+    if (!shippingDetails.name || !shippingDetails.address || !shippingDetails.city || !shippingDetails.postalCode || !shippingDetails.country || !shippingDetails.phone) {
+      console.warn('Invalid shipping details:', shippingDetails);
+      return res.status(400).json({ error: 'Invalid shipping details: missing name, address, city, postalCode, country, or phone' });
+    }
+
+    // Validate item structure
+    for (const item of items) {
+      if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
+        console.warn('Invalid item structure:', item);
+        return res.status(400).json({ error: 'Invalid item structure: missing name, quantity, price, or imageUrls' });
+      }
+    }
+
+    // Fetch seller's email from Firestore
+    const userDoc = await getDoc(doc(db, 'users', sellerId));
+    if (!userDoc.exists()) {
+      console.warn(`Seller ${sellerId} not found in Firestore`);
+      return res.status(400).json({ error: 'Seller not found' });
+    }
+    const email = userDoc.data().email;
+    if (!email) {
+      console.warn(`No email found for seller ${sellerId}`);
+      return res.status(400).json({ error: 'No email found for seller' });
+    }
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      console.warn('Invalid email format:', email);
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Verify order exists in Firestore
+    const orderRef = doc(db, 'orders', orderId);
+    const orderSnap = await getDoc(orderRef);
+    if (!orderSnap.exists()) {
+      console.warn(`Order ${orderId} not found in Firestore`);
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Generate table rows for items
+    const itemRows = items.map((item) => `
+      <tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 10px;">
+          <img src="${item.imageUrls[0] || 'https://via.placeholder.com/50'}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />
+        </td>
+        <td style="padding: 10px;">
+          ${item.name}
+        </td>
+        <td style="padding: 10px; text-align: center;">
+          ${item.quantity}
+        </td>
+        <td style="padding: 10px; text-align: right;">
+          ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${(item.price * item.quantity).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+        </td>
+      </tr>
+    `).join('');
+
+    // Construct email
+    const mailOptions = {
+      from: `"Foremade Team" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+      to: email,
+      subject: `New Order Notification - #${orderId}`,
+      text: `You have a new order #${orderId} on Foremade! Total: ${currency.toUpperCase()}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}. Please prepare the items for shipment to ${shippingDetails.name}, ${shippingDetails.address}, ${shippingDetails.city}, ${shippingDetails.postalCode}, ${shippingDetails.country}. View details in your seller dashboard: ${process.env.DOMAIN}/seller-dashboard`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #1a73e8;">New Order Notification - #${orderId}</h2>
+          <p>Dear Seller,</p>
+          <p>Congratulations! You have a new order on Foremade. Below are the details of the items sold:</p>
+          <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <thead>
+              <tr style="background-color: #f5f5f5;">
+                <th style="padding: 10px; text-align: left;">Image</th>
+                <th style="padding: 10px; text-align: left;">Product</th>
+                <th style="padding: 10px; text-align: center;">Quantity</th>
+                <th style="padding: 10px; text-align: right;">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemRows}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3" style="padding: 10px; text-align: right; font-weight: bold;">Total:</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold;">
+                  ${currency.toLowerCase() === 'gbp' ? '£' : '₦'}${total.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+          <h3 style="color: #1a73e8;">Shipping Details</h3>
+          <p>Please prepare the items for shipment to:</p>
+          <p>
+            <strong>Name:</strong> ${shippingDetails.name}<br>
+            <strong>Address:</strong> ${shippingDetails.address}<br>
+            <strong>City:</strong> ${shippingDetails.city}<br>
+            <strong>Postal Code:</strong> ${shippingDetails.postalCode}<br>
+            <strong>Country:</strong> ${shippingDetails.country}<br>
+            <strong>Phone:</strong> ${shippingDetails.phone}
+          </p>
+          <p>View and manage this order in your seller dashboard:</p>
+          <a href="${process.env.DOMAIN}/seller-dashboard" style="display: inline-block; padding: 10px 20px; background-color: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">Go to Seller Dashboard</a>
+          <p>Need help? Contact our support team at <a href="mailto:support@foremade.com" style="color: #1a73e8;">support@foremade.com</a>.</p>
+          <p>Thank you for selling on Foremade!</p>
+          <p>Best regards,<br>The Foremade Team</p>
+          <hr style="border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #888;">This is an automated email. Please do not reply directly.</p>
+        </div>
+      `,
+    };
+
+    // Send email
+    await transporter.sendMail(mailOptions);
+    console.log(`Seller order notification email sent to ${email} for order ${orderId}`);
+    res.json({ status: 'success', message: 'Seller order notification email sent' });
+  } catch (error) {
+    console.error('Error sending seller order notification email:', {
+      message: error.message,
+      stack: error.stack,
+      payload: JSON.stringify(req.body, null, 2),
+    });
+    res.status(500).json({ error: 'Failed to send seller order notification email', details: error.message });
+  }
+});
+
 module.exports = router;
