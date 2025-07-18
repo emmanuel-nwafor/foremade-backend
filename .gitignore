@@ -1,0 +1,74 @@
+
+# Ignore all .env files (including backend/.env)
+*.env
+**/*.env
+
+# Ignore Node.js dependencies
+node_modules/
+npm-debug.log*
+
+# Ignore build/output files
+dist/
+build/
+out/
+*.log
+*.pid
+.md
+
+# Ignore OS-generated files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE/editor files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Ignore local config files
+config/local*
+settings/local*
+
+# Ignore test coverage reports
+coverage/
+
+# Ignore package-lock.json if you manage dependencies manually (optional)
+# package-lock.json
+
+# Ignore yarn artifacts (if using Yarn)
+yarn-error.log
+.pnp/
+.yarn/
+.md
+
+# Node.js
+node_modules/
+.env
+*.log
+
+# OS and user files
+AppData/
+Documents/
+Downloads/
+Desktop/
+*.lnk
+*.zip
+*.docx
+*.rtf
+*.pdf
+ntuser.*
+NTUSER.*
+
+# Other project folders
+../foremade-clone/
+../foremadeWebApp/
+../scout-web-app/
+../xtatehub/
+../BLUMDATE/
+../FOREMADE_BK_1/
+
+# IDE and system files
+.vscode/
+.idea/
+*.iml
+.DS_Store
