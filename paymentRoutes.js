@@ -583,7 +583,7 @@ router.post('/approve-payout', async (req, res) => {
     if (transactionData.status !== 'Pending' || transactionData.type !== 'Withdrawal') {
       return res.status(400).json({ error: 'Invalid transaction status or type' });
     }
-    const { amount, accountDetails } = transactionData;
+    const { amount } = transactionData;
 
     // Get seller's bank details
     const sellerRef = doc(db, 'sellers', sellerId);
@@ -591,7 +591,18 @@ router.post('/approve-payout', async (req, res) => {
     if (!sellerSnap.exists()) {
       return res.status(404).json({ error: 'Seller not found' });
     }
-    const { bankCode, accountNumber, fullName } = sellerSnap.data();
+    const { bankCode, accountNumber, fullName, email } = sellerSnap.data();
+
+    // Verify wallet balance
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    if (!walletSnap.exists()) {
+      return res.status(404).json({ error: 'Seller wallet not found' });
+    }
+    const walletData = walletSnap.data();
+    if ((walletData.pendingBalance || 0) < amount) {
+      return res.status(400).json({ error: 'Insufficient pending balance for payout' });
+    }
 
     // Create Paystack recipient
     const recipientCode = await createRecipient(bankCode, accountNumber, fullName || 'Seller');
@@ -615,12 +626,24 @@ router.post('/approve-payout', async (req, res) => {
     );
 
     if (response.data.status && response.data.data.status === 'otp') {
-      // Store transfer_code and update transaction status
+      // Update transaction to pending_otp
       await updateDoc(transactionRef, {
         status: 'pending_otp',
         transferCode: response.data.data.transfer_code,
         updatedAt: serverTimestamp(),
       });
+
+      // Send OTP notification to admin email (assuming admin email is stored)
+      const adminRef = doc(db, 'admin', 'settings'); // Adjust to your admin collection
+      const adminSnap = await getDoc(adminRef);
+      const adminEmail = adminSnap.exists() ? adminSnap.data().email : 'emitexc.e.o1@gmail.com'; // Fallback to your email
+      await emailService.sendOrderConfirmationSimpleEmail({
+        email: adminEmail,
+        orderNumber: transactionId,
+        name: 'Admin',
+        message: `An OTP has been sent for payout approval of ₦${amount.toFixed(2)} for transaction ${transactionId}.`,
+      });
+
       res.status(200).json({
         message: `OTP sent to admin email for transaction ${transactionId}`,
         transferCode: response.data.data.transfer_code,
