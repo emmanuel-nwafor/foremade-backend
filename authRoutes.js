@@ -109,14 +109,14 @@ router.post('/register', async (req, res) => {
       details: { user_id: uid, email, role },
     });
 
-    res.status(200).json({ message: 'User registered, redirecting to profile', role, redirectUrl: '/profile' });
+    res.status(200).json({ message: 'User registered, redirecting to profile', role, redirectUrl: role === 'Admin' ? '/admin-dashboard' : '/profile' });
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({ error: 'Registration failed: ' + error.message });
   }
 });
 
-router.use('/admin/*', async (req, res, next) => {
+router.use('/admin/*all', async (req, res, next) => {
   try {
     const userId = req.headers['x-user-id'];
     if (!userId) {
@@ -133,7 +133,7 @@ router.use('/admin/*', async (req, res, next) => {
   }
 });
 
-router.use('/seller/*', async (req, res, next) => {
+router.use('/seller/*all', async (req, res, next) => {
   try {
     const userId = req.headers['x-user-id'];
     if (!userId) {
