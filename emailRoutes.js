@@ -5,14 +5,6 @@ const { doc, getDoc, updateDoc, serverTimestamp } = require('firebase/firestore'
 const router = express.Router();
 const emailService = require('./emailService');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
 /**
  * @swagger
  * /send-product-approved-email:
@@ -59,6 +51,7 @@ const transporter = nodemailer.createTransport({
  *                 status:
  *                   type: string
  *                   example: "success"
+ क्यों
  *                 message:
  *                   type: string
  *                   example: "Approval email sent to seller"
@@ -81,7 +74,6 @@ const transporter = nodemailer.createTransport({
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-product-approved-email endpoint
 router.post('/send-product-approved-email', async (req, res) => {
   try {
     const { productId, productName, sellerId, sellerEmail } = req.body;
@@ -97,7 +89,7 @@ router.post('/send-product-approved-email', async (req, res) => {
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
         console.warn(`Seller ${sellerId} not found in Firestore`);
-        return res.status(400).json({ error: 'Seller not found' });
+        return res.status(404).json({ error: 'Seller not found' });
       }
       email = userDoc.data().email;
       if (!email) {
@@ -118,8 +110,18 @@ router.post('/send-product-approved-email', async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    await emailService.sendProductApprovedEmail({ productId, productName, sellerId, sellerEmail });
-    console.log(`Approval email sent to ${email} for product ${productId}`);
+    try {
+      await emailService.sendProductApprovedEmail({ email, productName });
+      console.log(`Approval email sent to ${email} for product ${productId}`);
+    } catch (emailError) {
+      console.error('Nodemailer error in sendProductApprovedEmail:', {
+        message: emailError.message,
+        stack: emailError.stack,
+        email,
+        productName,
+      });
+      return res.status(500).json({ error: 'Failed to send approval email', details: emailError.message });
+    }
 
     await updateDoc(productRef, {
       status: 'approved',
@@ -128,7 +130,7 @@ router.post('/send-product-approved-email', async (req, res) => {
 
     res.json({ status: 'success', message: 'Approval email sent to seller' });
   } catch (error) {
-    console.error('Error sending product approved email:', {
+    console.error('Error in send-product-approved-email endpoint:', {
       message: error.message,
       stack: error.stack,
       payload: req.body,
@@ -210,7 +212,6 @@ router.post('/send-product-approved-email', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-product-rejected-email endpoint
 router.post('/send-product-rejected-email', async (req, res) => {
   try {
     const { productId, productName, sellerId, sellerEmail, reason } = req.body;
@@ -226,7 +227,7 @@ router.post('/send-product-rejected-email', async (req, res) => {
       const userDoc = await getDoc(doc(db, 'users', sellerId));
       if (!userDoc.exists()) {
         console.warn(`Seller ${sellerId} not found in Firestore`);
-        return res.status(400).json({ error: 'Seller not found' });
+        return res.status(404).json({ error: 'Seller not found' });
       }
       email = userDoc.data().email;
       if (!email) {
@@ -247,8 +248,19 @@ router.post('/send-product-rejected-email', async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    await emailService.sendProductRejectedEmail({ productId, productName, sellerId, sellerEmail, reason });
-    console.log(`Rejection email sent to ${email} for product ${productId}`);
+    try {
+      await emailService.sendProductRejectedEmail({ email, productName, reason });
+      console.log(`Rejection email sent to ${email} for product ${productId}`);
+    } catch (emailError) {
+      console.error('Nodemailer error in sendProductRejectedEmail:', {
+        message: emailError.message,
+        stack: emailError.stack,
+        email,
+        productName,
+        reason,
+      });
+      return res.status(500).json({ error: 'Failed to send rejection email', details: emailError.message });
+    }
 
     await updateDoc(productRef, {
       status: 'rejected',
@@ -258,7 +270,7 @@ router.post('/send-product-rejected-email', async (req, res) => {
 
     res.json({ status: 'success', message: 'Rejection email sent to seller' });
   } catch (error) {
-    console.error('Error sending product rejected email:', {
+    console.error('Error in send-product-rejected-email endpoint:', {
       message: error.message,
       stack: error.stack,
       payload: req.body,
