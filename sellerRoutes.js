@@ -710,30 +710,47 @@ router.post('/approve-payout', async (req, res) => {
 router.post('/verify-transfer-otp', async (req, res) => {
   try {
     const { transactionId, otp } = req.body;
+    console.log('Request body:', { transactionId, otp }); // Debug log: Verify input
+
     if (!transactionId || !otp) {
       return res.status(400).json({ error: 'Missing transactionId or OTP' });
     }
 
+    // Fetch transaction
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
     if (!transactionSnap.exists()) {
+      console.log('Transaction not found:', transactionId); // Debug log
       return res.status(404).json({ error: 'Transaction not found' });
     }
-    const { transferCode, sellerId, amount } = transactionSnap.data();
-    if (!transferCode) {
-      return res.status(400).json({ error: 'No transfer code found' });
+    const transactionData = transactionSnap.data();
+    console.log('Transaction data:', transactionData); // Debug log: Check transaction fields
+
+    const { transferCode, sellerId, amount } = transactionData;
+    if (!transferCode || !sellerId || !amount) {
+      console.log('Missing transaction fields:', { transferCode, sellerId, amount }); // Debug log
+      return res.status(400).json({
+        error: 'Missing required transaction fields',
+        details: { transferCode, sellerId, amount },
+      });
     }
 
+    // Fetch wallet
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
+      console.log('Wallet not found:', sellerId); // Debug log
       return res.status(404).json({ error: 'Seller wallet not found' });
     }
     const walletData = walletSnap.data();
-    if (walletData.availableBalance < amount) {
+    console.log('Wallet data:', walletData); // Debug log: Check wallet fields
+    if (typeof walletData.availableBalance !== 'number' || walletData.availableBalance < amount) {
+      console.log('Invalid wallet balance:', { availableBalance: walletData.availableBalance, amount }); // Debug log
       return res.status(400).json({ error: 'Insufficient available balance for payout' });
     }
 
+    // Call Paystack
+    console.log('Calling Paystack with:', { transfer_code: transferCode, otp }); // Debug log: Before API call
     const response = await axios.post(
       'https://api.paystack.co/transfer/finalize_transfer',
       {
@@ -748,6 +765,13 @@ router.post('/verify-transfer-otp', async (req, res) => {
       }
     );
 
+    console.log('Paystack response:', JSON.stringify(response.data, null, 2)); // Debug log: Full response
+
+    if (!response.data || !response.data.data || typeof response.data.status !== 'boolean') {
+      console.log('Invalid Paystack response structure:', response.data); // Debug log
+      throw new Error('Invalid Paystack response structure');
+    }
+
     if (response.data.status && response.data.data.status === 'success') {
       await updateDoc(walletRef, {
         availableBalance: walletData.availableBalance - amount,
@@ -755,11 +779,12 @@ router.post('/verify-transfer-otp', async (req, res) => {
       });
       await updateDoc(transactionRef, {
         status: 'Approved',
-        transferReference: response.data.data.reference,
+        transferReference: response.data.data.reference || 'N/A',
         completedAt: serverTimestamp(),
       });
       const sellerRef = doc(db, 'sellers', sellerId);
       const sellerSnap = await getDoc(sellerRef);
+      console.log('Seller data:', sellerSnap.exists() ? sellerSnap.data() : 'Not found'); // Debug log
       if (sellerSnap.exists() && sellerSnap.data().email) {
         await addDoc(collection(db, 'notifications'), {
           type: 'payout_completed',
@@ -770,11 +795,19 @@ router.post('/verify-transfer-otp', async (req, res) => {
       }
       res.status(200).json({ status: 'success', message: 'Payout completed successfully' });
     } else {
+      console.log('Paystack failure:', response.data.message || 'No message provided'); // Debug log
       throw new Error(response.data.message || 'OTP verification failed');
     }
   } catch (error) {
-    console.error('Verify OTP error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to verify OTP', details: error.response?.data?.message || error.message });
+    console.error('Verify OTP error:', {
+      message: error.message,
+      stack: error.stack,
+      response: error.response?.data ? JSON.stringify(error.response.data, null, 2) : 'No response data',
+    }); // Detailed error log
+    res.status(500).json({
+      error: 'Failed to verify OTP',
+      details: error.response?.data?.message || error.message,
+    });
   }
 });
 
