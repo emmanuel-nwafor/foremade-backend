@@ -571,6 +571,8 @@ router.post('/approve-payout', async (req, res) => {
         }
       );
 
+      console.log('Approve payout Paystack response:', JSON.stringify(response.data, null, 2)); // Debug log
+
       if (response.data.status && response.data.data.status === 'otp') {
         await updateDoc(transactionRef, {
           status: 'pending_otp',
@@ -726,20 +728,20 @@ router.post('/verify-transfer-otp', async (req, res) => {
     const transactionData = transactionSnap.data();
     console.log('Transaction data:', transactionData); // Debug log: Check transaction fields
 
-    const { transferCode, userId, amount } = transactionData; // Changed sellerId to userId
-    if (!transferCode || !userId || !amount) {
-      console.log('Missing transaction fields:', { transferCode, userId, amount }); // Debug log
+    const { transferCode, sellerId, amount } = transactionData; // Use sellerId
+    if (!transferCode || !sellerId || !amount) {
+      console.log('Missing transaction fields:', { transferCode, sellerId, amount }); // Debug log
       return res.status(400).json({
         error: 'Missing required transaction fields',
-        details: { transferCode, userId, amount },
+        details: { transferCode, sellerId, amount },
       });
     }
 
     // Fetch wallet
-    const walletRef = doc(db, 'wallets', userId); // Changed sellerId to userId
+    const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
-      console.log('Wallet not found:', userId); // Debug log
+      console.log('Wallet not found:', sellerId); // Debug log
       return res.status(404).json({ error: 'Seller wallet not found' });
     }
     const walletData = walletSnap.data();
@@ -782,7 +784,7 @@ router.post('/verify-transfer-otp', async (req, res) => {
         transferReference: response.data.data.reference || 'N/A',
         completedAt: serverTimestamp(),
       });
-      const sellerRef = doc(db, 'sellers', userId); // Changed sellerId to userId
+      const sellerRef = doc(db, 'sellers', sellerId);
       const sellerSnap = await getDoc(sellerRef);
       console.log('Seller data:', sellerSnap.exists() ? sellerSnap.data() : 'Not found'); // Debug log
       if (sellerSnap.exists() && sellerSnap.data().email) {
@@ -790,7 +792,7 @@ router.post('/verify-transfer-otp', async (req, res) => {
           type: 'payout_completed',
           message: `Payout of ₦${amount.toFixed(2)} for transaction ${transactionId} completed`,
           createdAt: new Date(),
-          details: { transactionId, userId, email: sellerSnap.data().email }, // Changed sellerId to userId
+          details: { transactionId, sellerId, email: sellerSnap.data().email },
         });
       }
       res.status(200).json({ status: 'success', message: 'Payout completed successfully' });
@@ -804,10 +806,18 @@ router.post('/verify-transfer-otp', async (req, res) => {
       stack: error.stack,
       response: error.response?.data ? JSON.stringify(error.response.data, null, 2) : 'No response data',
     }); // Detailed error log
-    res.status(500).json({
-      error: 'Failed to verify OTP',
-      details: error.response?.data?.message || error.message,
-    });
+    const errorMessage = error.response?.data?.message || error.message;
+    if (errorMessage.includes('OTP has expired') || errorMessage.includes('OTP could not be verified')) {
+      res.status(400).json({
+        error: 'Invalid or expired OTP',
+        details: 'Please click "Resend OTP" to receive a new OTP.',
+      });
+    } else {
+      res.status(500).json({
+        error: 'Failed to verify OTP',
+        details: errorMessage,
+      });
+    }
   }
 });
 
@@ -935,6 +945,8 @@ router.post('/resend-otp', async (req, res) => {
       }
     );
 
+    console.log('Resend OTP Paystack response:', JSON.stringify(response.data, null, 2)); // Debug log
+
     if (response.data.status && response.data.data.status === 'otp') {
       await updateDoc(transactionRef, {
         transferCode: response.data.data.transfer_code,
@@ -1033,12 +1045,16 @@ router.post('/reject-payout', async (req, res) => {
       updatedAt: serverTimestamp(),
     });
 
-    await addDoc(collection(db, 'notifications'), {
-      type: 'payout_rejected',
-      message: `Payout request of ₦${transactionSnap.data().amount.toFixed(2)} for transaction ${transactionId} rejected`,
-      createdAt: new Date(),
-      details: { transactionId, sellerId },
-    });
+    const sellerRef = doc(db, 'sellers', sellerId);
+    const sellerSnap = await getDoc(sellerRef);
+    if (sellerSnap.exists() && sellerSnap.data().email) {
+      await addDoc(collection(db, 'notifications'), {
+        type: 'payout_rejected',
+        message: `Payout request of ₦${transactionSnap.data().amount.toFixed(2)} for transaction ${transactionId} rejected`,
+        createdAt: new Date(),
+        details: { transactionId, sellerId, email: sellerSnap.data().email },
+      });
+    }
 
     res.json({
       status: 'success',
