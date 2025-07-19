@@ -726,20 +726,20 @@ router.post('/verify-transfer-otp', async (req, res) => {
     const transactionData = transactionSnap.data();
     console.log('Transaction data:', transactionData); // Debug log: Check transaction fields
 
-    const { transferCode, sellerId, amount } = transactionData;
-    if (!transferCode || !sellerId || !amount) {
-      console.log('Missing transaction fields:', { transferCode, sellerId, amount }); // Debug log
+    const { transferCode, userId, amount } = transactionData; // Changed sellerId to userId
+    if (!transferCode || !userId || !amount) {
+      console.log('Missing transaction fields:', { transferCode, userId, amount }); // Debug log
       return res.status(400).json({
         error: 'Missing required transaction fields',
-        details: { transferCode, sellerId, amount },
+        details: { transferCode, userId, amount },
       });
     }
 
     // Fetch wallet
-    const walletRef = doc(db, 'wallets', sellerId);
+    const walletRef = doc(db, 'wallets', userId); // Changed sellerId to userId
     const walletSnap = await getDoc(walletRef);
     if (!walletSnap.exists()) {
-      console.log('Wallet not found:', sellerId); // Debug log
+      console.log('Wallet not found:', userId); // Debug log
       return res.status(404).json({ error: 'Seller wallet not found' });
     }
     const walletData = walletSnap.data();
@@ -782,7 +782,7 @@ router.post('/verify-transfer-otp', async (req, res) => {
         transferReference: response.data.data.reference || 'N/A',
         completedAt: serverTimestamp(),
       });
-      const sellerRef = doc(db, 'sellers', sellerId);
+      const sellerRef = doc(db, 'sellers', userId); // Changed sellerId to userId
       const sellerSnap = await getDoc(sellerRef);
       console.log('Seller data:', sellerSnap.exists() ? sellerSnap.data() : 'Not found'); // Debug log
       if (sellerSnap.exists() && sellerSnap.data().email) {
@@ -790,7 +790,7 @@ router.post('/verify-transfer-otp', async (req, res) => {
           type: 'payout_completed',
           message: `Payout of ₦${amount.toFixed(2)} for transaction ${transactionId} completed`,
           createdAt: new Date(),
-          details: { transactionId, sellerId, email: sellerSnap.data().email },
+          details: { transactionId, userId, email: sellerSnap.data().email }, // Changed sellerId to userId
         });
       }
       res.status(200).json({ status: 'success', message: 'Payout completed successfully' });
