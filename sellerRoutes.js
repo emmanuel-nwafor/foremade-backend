@@ -69,6 +69,10 @@ const router = express.Router();
  *             schema:
  *               type: object
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   description: Indicates successful onboarding
+ *                   example: true
  *                 recipientCode:
  *                   type: string
  *                   description: Paystack recipient code (Nigeria)
@@ -106,8 +110,8 @@ router.post('/onboard-seller', async (req, res) => {
     if (!userSnap.exists()) {
       return res.status(404).json({ error: 'User not found' });
     }
-    if (userSnap.data().role !== 'Buyer') {
-      return res.status(400).json({ error: 'User is already a Seller or Admin' });
+    if (userSnap.data().role === 'Seller' || userSnap.data().isOnboarded) {
+      return res.status(400).json({ error: 'User is already a Seller' });
     }
 
     const sellerData = {
@@ -196,9 +200,13 @@ router.post('/onboard-seller', async (req, res) => {
       sellerData.stripeAccountId = account.id;
       sellerData.bankName = bankName;
       await setDoc(doc(db, 'sellers', userId), sellerData, { merge: true });
-      await updateDoc(userRef, { role: 'Seller', updatedAt: new Date().toISOString() });
+      await updateDoc(userRef, {
+        role: 'Seller',
+        isOnboarded: false, // Set to false until Stripe onboarding is complete
+        updatedAt: new Date().toISOString(),
+      });
       return res.json({
-        message: 'Seller onboarding initiated, complete via Stripe',
+        success: true,
         stripeAccountId: account.id,
         redirectUrl: accountLink.url,
       });
@@ -207,7 +215,11 @@ router.post('/onboard-seller', async (req, res) => {
     }
 
     await setDoc(doc(db, 'sellers', userId), sellerData, { merge: true });
-    await updateDoc(userRef, { role: 'Seller', updatedAt: new Date().toISOString() });
+    await updateDoc(userRef, {
+      role: 'Seller',
+      isOnboarded: true,
+      updatedAt: new Date().toISOString(),
+    });
 
     await addDoc(collection(db, 'notifications'), {
       type: 'seller_onboarded',
@@ -217,7 +229,7 @@ router.post('/onboard-seller', async (req, res) => {
     });
 
     res.json({
-      message: 'Seller onboarding successful',
+      success: true,
       recipientCode: sellerData.paystackRecipientCode || undefined,
       stripeAccountId: sellerData.stripeAccountId || undefined,
     });
@@ -226,6 +238,7 @@ router.post('/onboard-seller', async (req, res) => {
     res.status(500).json({ error: 'Failed to onboard seller', details: error.message });
   }
 });
+
 
 /**
  * @swagger
@@ -801,6 +814,61 @@ router.post('/resend-otp', async (req, res) => {
   } catch (error) {
     console.error('Resend OTP error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to resend OTP', details: error.response?.data?.message || error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /stripe-onboarding-callback:
+ *   get:
+ *     summary: Handle Stripe onboarding callback
+ *     description: Updates seller status after completing Stripe onboarding
+ *     tags: [Seller Management]
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Onboarding status (success or failed)
+ *         example: "success"
+ *       - in: query
+ *         name: accountId
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Stripe account ID
+ *         example: "acct_1234567890"
+ *     responses:
+ *       200:
+ *         description: Onboarding status updated
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
+router.get('/stripe-onboarding-callback', async (req, res) => {
+  try {
+    const { status, accountId } = req.query;
+    if (!status || !accountId) {
+      return res.status(400).json({ error: 'Missing status or accountId' });
+    }
+    if (status !== 'success') {
+      return res.redirect('/seller-onboarding?error=Stripe onboarding failed');
+    }
+    const sellerRef = doc(db, 'sellers', accountId);
+    const sellerSnap = await getDoc(sellerRef);
+    if (!sellerSnap.exists()) {
+      return res.status(404).json({ error: 'Seller not found' });
+    }
+    await updateDoc(doc(db, 'users', sellerSnap.data().userId), {
+      isOnboarded: true,
+      updatedAt: new Date().toISOString(),
+    });
+    res.redirect('/seller-dashboard');
+  } catch (error) {
+    console.error('Stripe callback error:', error);
+    res.redirect(`/seller-onboarding?error=${encodeURIComponent(error.message)}`);
   }
 });
 
