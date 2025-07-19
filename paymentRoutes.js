@@ -3,13 +3,11 @@ const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const crypto = require('crypto');
-const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 const router = express.Router();
 const emailService = require('./emailService');
 
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 
-// Log env vars for debugging
 console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
@@ -66,7 +64,6 @@ console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /create-payment-intent endpoint (for UK - Stripe)
 router.post('/create-payment-intent', async (req, res) => {
   try {
     if (!req.body) {
@@ -95,6 +92,60 @@ router.post('/create-payment-intent', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /paystack-webhook:
+ *   post:
+ *     summary: Handle Paystack webhook events
+ *     description: Processes Paystack webhook events for Nigeria payments
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               event:
+ *                 type: string
+ *                 description: Webhook event type
+ *                 example: "charge.success"
+ *               data:
+ *                 type: object
+ *                 properties:
+ *                   reference:
+ *                     type: string
+ *                     example: "ref_1234567890"
+ *                   amount:
+ *                     type: number
+ *                     example: 500000
+ *                   metadata:
+ *                     type: object
+ *                     example: { sellerId: "seller123", handlingFee: 1000, buyerProtectionFee: 500, taxFee: 250 }
+ *     responses:
+ *       200:
+ *         description: Webhook processed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *       400:
+ *         description: Invalid webhook signature
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/paystack-webhook', async (req, res) => {
   try {
     const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -180,29 +231,53 @@ router.post('/paystack-webhook', async (req, res) => {
   }
 });
 
-async function createRecipient(bankCode, accountNumber, name) {
-  const response = await axios.post(
-    'https://api.paystack.co/transferrecipient',
-    {
-      type: 'nuban',
-      name,
-      account_number: accountNumber,
-      bank_code: bankCode,
-      currency: 'NGN',
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
-  if (!response.data.status) {
-    throw new Error('Failed to create transfer recipient');
-  }
-  return response.data.data.recipient_code;
-}
-
+/**
+ * @swagger
+ * /verify-paystack-payment:
+ *   post:
+ *     summary: Verify Paystack payment
+ *     description: Verifies a Paystack payment for Nigeria
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reference
+ *             properties:
+ *               reference:
+ *                 type: string
+ *                 description: Payment reference
+ *                 example: "ref_1234567890"
+ *     responses:
+ *       200:
+ *         description: Payment verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 data:
+ *                   type: object
+ *                   description: Paystack payment details
+ *       400:
+ *         description: Invalid request or payment not successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/verify-paystack-payment', async (req, res) => {
   try {
     const { reference } = req.body;
@@ -263,7 +338,7 @@ router.post('/verify-paystack-payment', async (req, res) => {
  *                 type: string
  *                 format: email
  *                 description: Customer email address
- *                 example: customer@example.com
+ *                 example: "customer@example.com"
  *               currency:
  *                 type: string
  *                 default: NGN
@@ -299,7 +374,6 @@ router.post('/verify-paystack-payment', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /initiate-paystack-payment endpoint (for Nigeria - Paystack)
 router.post('/initiate-paystack-payment', async (req, res) => {
   try {
     if (!req.body) {
@@ -375,6 +449,25 @@ router.post('/initiate-paystack-payment', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /payment-callback:
+ *   get:
+ *     summary: Handle Paystack payment callback
+ *     description: Processes the callback from Paystack after payment
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: query
+ *         name: reference
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Payment reference
+ *         example: "ref_1234567890"
+ *     responses:
+ *       302:
+ *         description: Redirects to order confirmation or checkout with error
+ */
 router.get('/payment-callback', async (req, res) => {
   try {
     const { reference } = req.query;
@@ -393,14 +486,11 @@ router.get('/payment-callback', async (req, res) => {
         status: 'completed',
         updatedAt: serverTimestamp(),
       });
-      // Send order confirmation email (simple)
       try {
-        // Fetch order details for email
         const orderRef = doc(db, 'orders', reference);
         const orderSnap = await getDoc(orderRef);
         if (orderSnap.exists()) {
           const orderData = orderSnap.data();
-          // Use orderData.email and orderData.orderNumber (or reference)
           await emailService.sendOrderConfirmationSimpleEmail({
             email: orderData.email,
             orderNumber: reference,
@@ -423,27 +513,24 @@ router.get('/payment-callback', async (req, res) => {
 /**
  * @swagger
  * /get-product-price:
- *   post:
+ *   get:
  *     summary: Get product price in user's local currency
  *     description: Returns product price converted to user's local currency based on location
  *     tags: [Products]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - price
- *             properties:
- *               price:
- *                 type: number
- *                 description: Product price in NGN (base currency)
- *                 example: 50000
- *               country:
- *                 type: string
- *                 description: User's country code (e.g., NG, GB, US)
- *                 example: GB
+ *     parameters:
+ *       - in: query
+ *         name: price
+ *         schema:
+ *           type: number
+ *         required: true
+ *         description: Product price in NGN
+ *         example: 50000
+ *       - in: query
+ *         name: country
+ *         schema:
+ *           type: string
+ *         description: User's country code (e.g., NG, GB, US)
+ *         example: GB
  *     responses:
  *       200:
  *         description: Price converted successfully
@@ -480,7 +567,6 @@ router.get('/payment-callback', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// Example route showing currency conversion
 router.get('/get-product-price', (req, res) => {
   try {
     const { price } = req.query;
@@ -493,7 +579,6 @@ router.get('/get-product-price', (req, res) => {
     const originalPrice = parseFloat(price);
     const userCurrency = req.userCurrency;
     
-    // Convert price from NGN to user's currency
     const convertedPrice = convertCurrency(originalPrice, 'NGN', userCurrency.code);
     const formattedPrice = formatCurrency(convertedPrice, userCurrency.code);
 
@@ -511,269 +596,27 @@ router.get('/get-product-price', (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /approve-payout:
- *   post:
- *     summary: Initiate a Paystack payout to a seller
- *     description: Initiates a payout to a seller's bank account, triggering an OTP to the admin's email
- *     tags: [Payments]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - sellerId
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: ID of the transaction to approve
- *                 example: txn_123
- *               sellerId:
- *                 type: string
- *                 description: ID of the seller receiving the payout
- *                 example: seller123
- *     responses:
- *       200:
- *         description: Payout initiated, OTP sent to admin email
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   description: Confirmation message
- *                 transferCode:
- *                   type: string
- *                   description: Paystack transfer code for OTP verification
- *       400:
- *         description: Invalid request
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.post('/approve-payout', async (req, res) => {
-  const { transactionId, sellerId } = req.body;
-  const secretKey = process.env.PAYSTACK_SECRET_KEY;
-
-  try {
-    // Validate request
-    if (!transactionId || !sellerId) {
-      return res.status(400).json({ error: 'Missing transactionId or sellerId' });
-    }
-
-    // Fetch transaction from Firestore
-    const transactionRef = doc(db, 'transactions', transactionId);
-    const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists()) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    const transactionData = transactionSnap.data();
-    if (transactionData.status !== 'Pending' || transactionData.type !== 'Withdrawal') {
-      return res.status(400).json({ error: 'Invalid transaction status or type' });
-    }
-    const { amount } = transactionData;
-
-    // Get seller's bank details
-    const sellerRef = doc(db, 'sellers', sellerId);
-    const sellerSnap = await getDoc(sellerRef);
-    if (!sellerSnap.exists()) {
-      return res.status(404).json({ error: 'Seller not found' });
-    }
-    const { bankCode, accountNumber, fullName, email } = sellerSnap.data();
-
-    // Verify wallet balance
-    const walletRef = doc(db, 'wallets', sellerId);
-    const walletSnap = await getDoc(walletRef);
-    if (!walletSnap.exists()) {
-      return res.status(404).json({ error: 'Seller wallet not found' });
-    }
-    const walletData = walletSnap.data();
-    if ((walletData.pendingBalance || 0) < amount) {
-      return res.status(400).json({ error: 'Insufficient pending balance for payout' });
-    }
-
-    // Create Paystack recipient
-    const recipientCode = await createRecipient(bankCode, accountNumber, fullName || 'Seller');
-
-    // Initiate Paystack transfer
-    const response = await axios.post(
-      'https://api.paystack.co/transfer',
-      {
-        source: 'balance',
-        amount: Math.round(amount * 100), // Convert NGN to kobo
-        recipient: recipientCode,
-        reason: `Payout for transaction ${transactionId}`,
-        currency: 'NGN',
+async function createRecipient(bankCode, accountNumber, name) {
+  const response = await axios.post(
+    'https://api.paystack.co/transferrecipient',
+    {
+      type: 'nuban',
+      name,
+      account_number: accountNumber,
+      bank_code: bankCode,
+      currency: 'NGN',
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
       },
-      {
-        headers: {
-          Authorization: `Bearer ${secretKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    if (response.data.status && response.data.data.status === 'otp') {
-      // Update transaction to pending_otp
-      await updateDoc(transactionRef, {
-        status: 'pending_otp',
-        transferCode: response.data.data.transfer_code,
-        updatedAt: serverTimestamp(),
-      });
-
-      // Send OTP notification to admin email (assuming admin email is stored)
-      const adminRef = doc(db, 'admin', 'settings'); // Adjust to your admin collection
-      const adminSnap = await getDoc(adminRef);
-      const adminEmail = adminSnap.exists() ? adminSnap.data().email : 'emitexc.e.o1@gmail.com'; // Fallback to your email
-      await emailService.sendOrderConfirmationSimpleEmail({
-        email: adminEmail,
-        orderNumber: transactionId,
-        name: 'Admin',
-        message: `An OTP has been sent for payout approval of ₦${amount.toFixed(2)} for transaction ${transactionId}.`,
-      });
-
-      res.status(200).json({
-        message: `OTP sent to admin email for transaction ${transactionId}`,
-        transferCode: response.data.data.transfer_code,
-      });
-    } else {
-      throw new Error('Transfer initiation failed');
     }
-  } catch (error) {
-    console.error('Approve payout error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to initiate payout', details: error.response?.data?.message || error.message });
+  );
+  if (!response.data.status) {
+    throw new Error('Failed to create transfer recipient');
   }
-});
-
-/**
- * @swagger
- * /verify-transfer-otp:
- *   post:
- *     summary: Verify OTP to finalize Paystack payout
- *     description: Verifies the OTP sent to the admin to finalize a payout to the seller's bank account
- *     tags: [Payments]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - otp
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: ID of the transaction to finalize
- *                 example: txn_123
- *               otp:
- *                 type: string
- *                 description: OTP received by the admin
- *                 example: "123456"
- *     responses:
- *       200:
- *         description: Payout finalized successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   description: Confirmation message
- *       400:
- *         description: Invalid request
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.post('/verify-transfer-otp', async (req, res) => {
-  const { transactionId, otp } = req.body;
-  const secretKey = process.env.PAYSTACK_SECRET_KEY;
-
-  try {
-    // Validate request
-    if (!transactionId || !otp) {
-      return res.status(400).json({ error: 'Missing transactionId or OTP' });
-    }
-
-    // Fetch transaction
-    const transactionRef = doc(db, 'transactions', transactionId);
-    const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists()) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    const { transferCode, sellerId, amount } = transactionSnap.data();
-    if (!transferCode) {
-      return res.status(400).json({ error: 'No transfer code found' });
-    }
-
-    // Finalize Paystack transfer
-    const response = await axios.post(
-      'https://api.paystack.co/transfer/finalize_transfer',
-      {
-        transfer_code: transferCode,
-        otp,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${secretKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    if (response.data.status && response.data.data.status === 'success') {
-      // Update transaction and wallet
-      await updateDoc(transactionRef, {
-        status: 'Completed',
-        completedAt: serverTimestamp(),
-      });
-      const walletRef = doc(db, 'wallets', sellerId);
-      const walletSnap = await getDoc(walletRef);
-      if (!walletSnap.exists()) {
-        throw new Error('Seller wallet not found');
-      }
-
-      // Notify seller via email
-      const sellerRef = doc(db, 'sellers', sellerId);
-      const sellerSnap = await getDoc(sellerRef);
-      if (sellerSnap.exists() && sellerSnap.data().email) {
-        await emailService.sendOrderConfirmationSimpleEmail({
-          email: sellerSnap.data().email,
-          orderNumber: transactionId,
-          name: sellerSnap.data().fullName || 'Seller',
-          message: `Your payout of ₦${amount.toFixed(2)} for transaction ${transactionId} has been completed.`,
-        });
-      }
-
-      res.status(200).json({ message: 'Payout completed successfully' });
-    } else {
-      throw new Error('OTP verification failed');
-    }
-  } catch (error) {
-    console.error('Verify OTP error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to verify OTP', details: error.response?.data?.message || error.message });
-  }
-});
+  return response.data.data.recipient_code;
+}
 
 module.exports = router;
