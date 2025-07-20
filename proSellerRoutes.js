@@ -6,8 +6,8 @@ const { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, order
 const { authenticateFirebaseToken } = require('./middleware');
 const soap = require('soap');
 const router = express.Router();
-const { sendSupportRequestEmail } = require('./emailService');
-const { sendProSellerApprovedEmail, sendProSellerRejectedEmail } = require('./emailService');
+const { sendSupportRequestEmail, sendProSellerApprovedEmail, sendProSellerRejectedEmail } = require('./emailService');
+const { WebApi } = require('smile-identity-core');
 
 /**
  * @swagger
@@ -178,12 +178,10 @@ const { sendProSellerApprovedEmail, sendProSellerRejectedEmail } = require('./em
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-const { WebApi } = require('smile-identity-core');
-
 router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
   try {
-    const { uid } = req.user;
-
+    const { uid } = req.user; // Firebase user ID
+    // Accept all possible frontend fields
     const {
       businessName,
       businessType = 'Company',
@@ -210,16 +208,122 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       ...rest
     } = req.body;
 
+    // Validate required fields
     if (!businessName || !businessType || !phone || !address) {
       return res.status(400).json({
         error: 'Missing required fields: businessName, businessType, phone, address'
       });
     }
 
+    // --- VERIFICATION LOGIC ---
+    // 1. Verify business registration number
+    if (regNumber && country) {
+      if (country === 'Nigeria' || country === 'NG') {
+        try {
+          const response = await axios.post(
+            'https://api.dojah.io/api/v1/kyc/business/lookup',
+            { country: 'NG', registration_number: regNumber },
+            { headers: { 'AppId': process.env.DOJAH_APP_ID, 'Authorization': process.env.DOJAH_SECRET } }
+          );
+          if (!response.data || response.data.status !== true) {
+            return res.status(400).json({ error: 'Invalid or unverified business registration number (Nigeria)' });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Failed to verify business registration number (Nigeria)', details: err.response?.data || err.message });
+        }
+      } else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+        try {
+          const response = await axios.get(
+            `https://api.company-information.service.gov.uk/company/${regNumber}`,
+            { auth: { username: process.env.COMPANIES_HOUSE_API_KEY, password: '' } }
+          );
+          if (!response.data || response.data.error) {
+            return res.status(400).json({ error: 'Invalid or unverified business registration number (UK)' });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Failed to verify business registration number (UK)', details: err.response?.data || err.message });
+        }
+      }
+    }
+
+    // 2. Verify tax reference number
+    if (taxRef && country) {
+      if (country === 'Nigeria' || country === 'NG') {
+        try {
+          const response = await axios.post(
+            'https://api.dojah.io/api/v1/kyc/tin/lookup',
+            { country: 'NG', tin: taxRef },
+            { headers: { 'AppId': process.env.DOJAH_APP_ID, 'Authorization': process.env.DOJAH_SECRET } }
+          );
+          if (!response.data || response.data.status !== true) {
+            return res.status(400).json({ error: 'Invalid or unverified TIN (Nigeria)' });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Failed to verify TIN (Nigeria)', details: err.response?.data || err.message });
+        }
+      } else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+        try {
+          const vatNumber = taxRef.replace(/\s+/g, '');
+          
+          // Use VIES SOAP API for UK VAT verification
+          const vatValid = await new Promise((resolve, reject) => {
+            const url = 'http://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl';
+            
+            soap.createClient(url, (err, client) => {
+              if (err) {
+                return reject(err);
+              }
+              
+              client.checkVat({
+                countryCode: 'GB',
+                vatNumber: vatNumber
+              }, (err, result) => {
+                if (err) {
+                  return reject(err);
+                }
+                
+                // VIES returns valid: true if VAT number is valid
+                resolve(result && result.valid === true);
+              });
+            });
+          });
+          
+          if (!vatValid) {
+            return res.status(400).json({ error: 'Invalid or unverified VAT number (UK)' });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Failed to verify VAT number (UK)', details: err.message });
+        }
+      }
+    }
+
+    // 3. Verify bank account (Nigeria only)
+    if (accountNumber && bankCode && (country === 'Nigeria' || country === 'NG')) {
+      try {
+        const response = await axios.get(
+          `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        if (!response.data.status) {
+          return res.status(400).json({ error: 'Invalid or unverified bank account (Nigeria)', message: response.data.message });
+        }
+      } catch (err) {
+        return res.status(400).json({ error: 'Failed to verify bank account (Nigeria)', details: err.response?.data?.message || err.message });
+      }
+    }
+    // --- END VERIFICATION LOGIC ---
+
+    // Map categories from productLines if not provided
     const finalCategories = Array.isArray(categories) && categories.length > 0
       ? categories
       : (Array.isArray(productLines) ? productLines : []);
 
+    // Build extended description with extra fields
     const extraDescription = [
       description,
       regNumber ? `Reg Number: ${regNumber}` : '',
@@ -236,12 +340,14 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       agree !== undefined ? `Agreed to terms: ${agree}` : ''
     ].filter(Boolean).join(', ');
 
+    // Check if user already exists
     const userRef = doc(db, 'users', uid);
     const userSnap = await getDoc(userRef);
     if (!userSnap.exists()) {
       return res.status(404).json({ error: 'User not found. Please sync your account first.' });
     }
 
+    // Check if user is already a pro seller
     const proSellerQuery = query(collection(db, 'proSellers'), where('userId', '==', uid));
     const proSellerSnap = await getDocs(proSellerQuery);
     if (!proSellerSnap.empty) {
@@ -340,6 +446,7 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
     const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const extraFields = { ...rest };
 
+    // Store any extra fields in a dedicated object
     const proSellerData = {
       proSellerId,
       userId: uid,
@@ -370,17 +477,47 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
         bulkUpload: true,
         prioritySupport: true
       },
-      extraFields,
+      extraFields, // Store any extra fields from frontend
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
 
     await setDoc(doc(db, 'proSellers', proSellerId), proSellerData);
-    await setDoc(doc(db, 'sellers', uid), {
-      ...proSellerData,
-      proSellerId
+
+    // Create seller document (for regular seller functionality)
+    const sellerRef = doc(db, 'sellers', uid);
+    await setDoc(sellerRef, {
+      userId: uid,
+      businessName,
+      businessType,
+      phone,
+      phoneCode: phoneCode || '',
+      address,
+      website: website || '',
+      description: extraDescription,
+      categories: finalCategories,
+      regNumber: regNumber || '',
+      taxRef: taxRef || '',
+      country: country || '',
+      email: email || '',
+      manager: manager || '',
+      managerEmail: managerEmail || '',
+      managerPhone: managerPhone || '',
+      accountName: accountName || '',
+      accountNumber: accountNumber || '',
+      bankName: bankName || '',
+      agree: agree !== undefined ? agree : false,
+      isProSeller: true,
+      proSellerId,
+      status: 'pending',
+      extraFields, // Store any extra fields from frontend
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
     });
-    await setDoc(doc(db, 'wallets', uid), {
+
+    // Create wallet for the seller
+    const walletRef = doc(db, 'wallets', uid);
+    await setDoc(walletRef, {
       userId: uid,
       availableBalance: 0,
       pendingBalance: 0,
@@ -388,10 +525,13 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
+
+    // Update user to mark as pro seller
     await updateDoc(userRef, {
+      isProSeller: true,
+      proSellerId,
       isSeller: true,
       sellerId: uid,
-      proSellerId,
       updatedAt: serverTimestamp()
     });
 

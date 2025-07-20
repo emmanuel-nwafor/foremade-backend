@@ -11,6 +11,7 @@ const bankRoutes = require('./bankRoutes');
 const recaptchaRoutes = require('./recaptchaRoutes');
 const uploadRoutes = require('./uploadRoutes');
 const proSellerRoutes = require('./proSellerRoutes');
+const authRoutes = require('./authRoutes');
 
 const app = express();
 
@@ -80,6 +81,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
 }));
 
 // Routes handlers
+app.use(authRoutes);
 app.use(productRoutes);
 app.use(paymentRoutes);
 app.use(sellerRoutes);

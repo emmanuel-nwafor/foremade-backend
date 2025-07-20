@@ -9,7 +9,6 @@ const emailService = require('./emailService');
 
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 
-// Log env vars for debugging
 console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('PAYSTACK_SECRET_KEY:', process.env.PAYSTACK_SECRET_KEY ? 'Loaded' : 'Missing');
 console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
@@ -66,7 +65,6 @@ console.log('DOMAIN:', process.env.DOMAIN ? process.env.DOMAIN : 'Missing');
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /create-payment-intent endpoint (for UK - Stripe)
 router.post('/create-payment-intent', async (req, res) => {
   try {
     if (!req.body) {
@@ -95,6 +93,60 @@ router.post('/create-payment-intent', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /paystack-webhook:
+ *   post:
+ *     summary: Handle Paystack webhook events
+ *     description: Processes Paystack webhook events for Nigeria payments
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               event:
+ *                 type: string
+ *                 description: Webhook event type
+ *                 example: "charge.success"
+ *               data:
+ *                 type: object
+ *                 properties:
+ *                   reference:
+ *                     type: string
+ *                     example: "ref_1234567890"
+ *                   amount:
+ *                     type: number
+ *                     example: 500000
+ *                   metadata:
+ *                     type: object
+ *                     example: { sellerId: "seller123", handlingFee: 1000, buyerProtectionFee: 500, taxFee: 250 }
+ *     responses:
+ *       200:
+ *         description: Webhook processed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *       400:
+ *         description: Invalid webhook signature
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/paystack-webhook', async (req, res) => {
   try {
     const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -180,29 +232,53 @@ router.post('/paystack-webhook', async (req, res) => {
   }
 });
 
-async function createRecipient(bankCode, accountNumber, name) {
-  const response = await axios.post(
-    'https://api.paystack.co/transferrecipient',
-    {
-      type: 'nuban',
-      name,
-      account_number: accountNumber,
-      bank_code: bankCode,
-      currency: 'NGN',
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
-  if (!response.data.status) {
-    throw new Error('Failed to create transfer recipient');
-  }
-  return response.data.data.recipient_code;
-}
-
+/**
+ * @swagger
+ * /verify-paystack-payment:
+ *   post:
+ *     summary: Verify Paystack payment
+ *     description: Verifies a Paystack payment for Nigeria
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reference
+ *             properties:
+ *               reference:
+ *                 type: string
+ *                 description: Payment reference
+ *                 example: "ref_1234567890"
+ *     responses:
+ *       200:
+ *         description: Payment verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 data:
+ *                   type: object
+ *                   description: Paystack payment details
+ *       400:
+ *         description: Invalid request or payment not successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/verify-paystack-payment', async (req, res) => {
   try {
     const { reference } = req.body;
@@ -263,7 +339,7 @@ router.post('/verify-paystack-payment', async (req, res) => {
  *                 type: string
  *                 format: email
  *                 description: Customer email address
- *                 example: customer@example.com
+ *                 example: "customer@example.com"
  *               currency:
  *                 type: string
  *                 default: NGN
@@ -299,7 +375,6 @@ router.post('/verify-paystack-payment', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /initiate-paystack-payment endpoint (for Nigeria - Paystack)
 router.post('/initiate-paystack-payment', async (req, res) => {
   try {
     if (!req.body) {
@@ -375,6 +450,25 @@ router.post('/initiate-paystack-payment', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /payment-callback:
+ *   get:
+ *     summary: Handle Paystack payment callback
+ *     description: Processes the callback from Paystack after payment
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: query
+ *         name: reference
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Payment reference
+ *         example: "ref_1234567890"
+ *     responses:
+ *       302:
+ *         description: Redirects to order confirmation or checkout with error
+ */
 router.get('/payment-callback', async (req, res) => {
   try {
     const { reference } = req.query;
@@ -393,14 +487,11 @@ router.get('/payment-callback', async (req, res) => {
         status: 'completed',
         updatedAt: serverTimestamp(),
       });
-      // Send order confirmation email (simple)
       try {
-        // Fetch order details for email
         const orderRef = doc(db, 'orders', reference);
         const orderSnap = await getDoc(orderRef);
         if (orderSnap.exists()) {
           const orderData = orderSnap.data();
-          // Use orderData.email and orderData.orderNumber (or reference)
           await emailService.sendOrderConfirmationSimpleEmail({
             email: orderData.email,
             orderNumber: reference,
@@ -430,13 +521,13 @@ router.get('/payment-callback', async (req, res) => {
  *     parameters:
  *       - in: query
  *         name: price
- *         required: true
  *         schema:
  *           type: number
- *         description: Product price in NGN (base currency)
+ *         required: true
+ *         description: Product price in NGN
  *         example: 50000
- *       - in: header
- *         name: x-user-country
+ *       - in: query
+ *         name: country
  *         schema:
  *           type: string
  *         description: User's country code (e.g., NG, GB, US)
@@ -470,8 +561,13 @@ router.get('/payment-callback', async (req, res) => {
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-// Example route showing currency conversion
 router.get('/get-product-price', (req, res) => {
   try {
     const { price } = req.query;
@@ -484,7 +580,6 @@ router.get('/get-product-price', (req, res) => {
     const originalPrice = parseFloat(price);
     const userCurrency = req.userCurrency;
     
-    // Convert price from NGN to user's currency
     const convertedPrice = convertCurrency(originalPrice, 'NGN', userCurrency.code);
     const formattedPrice = formatCurrency(convertedPrice, userCurrency.code);
 
@@ -501,5 +596,28 @@ router.get('/get-product-price', (req, res) => {
     res.status(500).json({ error: 'Failed to convert currency', details: error.message });
   }
 });
+
+async function createRecipient(bankCode, accountNumber, name) {
+  const response = await axios.post(
+    'https://api.paystack.co/transferrecipient',
+    {
+      type: 'nuban',
+      name,
+      account_number: accountNumber,
+      bank_code: bankCode,
+      currency: 'NGN',
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  if (!response.data.status) {
+    throw new Error('Failed to create transfer recipient');
+  }
+  return response.data.data.recipient_code;
+}
 
 module.exports = router;

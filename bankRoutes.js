@@ -264,7 +264,7 @@ router.post('/verify-business-reg-number', async (req, res) => {
  * /verify-tax-number:
  *   post:
  *     summary: Verify tax reference number (Nigeria & UK)
- *     description: Verify a tax reference number using Smile Identity (Nigeria TIN) or VIES SOAP API (UK VAT)
+ *     description: Verify a tax reference number using Dojah (Nigeria TIN) or VIES SOAP API (UK VAT)
  *     tags: [Banking]
  *     requestBody:
  *       required: true
@@ -317,22 +317,55 @@ router.post('/verify-business-reg-number', async (req, res) => {
  *               $ref: '#/components/schemas/Error'
  */
 router.post('/verify-tax-number', async (req, res) => {
-  const { country, taxNumber, fullName } = req.body;
+  const { country, taxNumber } = req.body;
   try {
-    if (!taxNumber) {
-      return res.status(400).json({ error: 'taxNumber is required' });
+    if (!country || !taxNumber) {
+      return res.status(400).json({ error: 'country and taxNumber are required' });
     }
-    // Auto-verify: always return success
-    return res.json({
-      status: 'success',
-      data: {
-        isValid: true,
-        taxNumber,
-        message: 'Auto-verified (no reliable checker available)'
+    if (country === 'NG') {
+      // Nigeria: Dojah TIN lookup
+      const response = await axios.post(
+        'https://api.dojah.io/api/v1/kyc/tin/lookup',
+        { country: 'NG', tin: taxNumber },
+        { headers: { 'AppId': process.env.DOJAH_APP_ID, 'Authorization': process.env.DOJAH_SECRET } }
+      );
+      return res.json({ status: 'success', data: response.data });
+    } else if (country === 'UK') {
+      // UK: VIES SOAP API for VAT verification
+      const vatNumber = taxNumber.replace(/\s+/g, '');
+      
+      const vatValid = await new Promise((resolve, reject) => {
+        const url = 'http://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl';
+        
+        soap.createClient(url, (err, client) => {
+          if (err) {
+            return reject(err);
+          }
+          
+          client.checkVat({
+            countryCode: 'GB',
+            vatNumber: vatNumber
+          }, (err, result) => {
+            if (err) {
+              return reject(err);
+            }
+            
+            // VIES returns valid: true if VAT number is valid
+            resolve(result && result.valid === true);
+          });
+        });
+      });
+      
+      if (vatValid) {
+        return res.json({ status: 'success', data: { isValid: true, vatNumber } });
+      } else {
+        return res.status(400).json({ error: 'Invalid VAT number', data: { isValid: false, vatNumber } });
       }
-    });
+    } else {
+      return res.status(400).json({ error: 'Unsupported country' });
+    }
   } catch (error) {
-    res.status(500).json({ error: 'Verification failed', details: error.message });
+    res.status(500).json({ error: 'Verification failed', details: error.response?.data || error.message });
   }
 });
 

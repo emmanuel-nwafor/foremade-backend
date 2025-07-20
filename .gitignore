@@ -40,3 +40,38 @@ yarn-error.log
 .pnp/
 .yarn/
 .md
+<<<<<<< HEAD
+=======
+
+# Node.js
+node_modules/
+.env
+*.log
+
+# OS and user files
+AppData/
+Documents/
+Downloads/
+Desktop/
+*.lnk
+*.zip
+*.docx
+*.rtf
+*.pdf
+ntuser.*
+NTUSER.*
+
+# Other project folders
+../foremade-clone/
+../foremadeWebApp/
+../scout-web-app/
+../xtatehub/
+../BLUMDATE/
+../FOREMADE_BK_1/
+
+# IDE and system files
+.vscode/
+.idea/
+*.iml
+.DS_Store
+>>>>>>> f13c7825bf8949ea47db852d6b50efdee0a2c65a

@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection } = require('firebase/firestore');
+const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection, increment } = require('firebase/firestore');
 const router = express.Router();
 
 /**
@@ -101,11 +101,34 @@ router.post('/onboard-seller', async (req, res) => {
       return res.status(400).json({ error: 'Missing userId, country, or fullName' });
     }
 
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (userSnap.data().role === 'Seller' || userSnap.data().isOnboarded) {
+      return res.status(400).json({ error: 'User is already a Seller' });
+    }
+
+    const sellerData = {
+      fullName,
+      country,
+      idNumber: country === 'United Kingdom' ? idNumber : '',
+      bankName: '',
+      bankCode: country === 'Nigeria' ? bankCode : '',
+      accountNumber: country === 'Nigeria' ? accountNumber : '',
+      iban: country === 'United Kingdom' ? iban : '',
+      email: country === 'United Kingdom' ? email : userSnap.data().email,
+      paystackRecipientCode: '',
+      stripeAccountId: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
     if (country === 'Nigeria') {
       if (!bankCode || !accountNumber) {
-        return res.status(400).json({ error: 'Missing bankCode or accountNumber for Nigeria' });
+        return res.status(400).json({ error: 'Bank code and account number required for Nigeria' });
       }
-      // Verify bank account
       const verifyResponse = await axios.get(
         `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
         {
@@ -118,7 +141,6 @@ router.post('/onboard-seller', async (req, res) => {
       if (!verifyResponse.data.status) {
         return res.status(400).json({ error: `Failed to verify bank account: ${verifyResponse.data.message}` });
       }
-      // Create Paystack recipient
       const recipientResponse = await axios.post(
         'https://api.paystack.co/transferrecipient',
         {
@@ -709,13 +731,13 @@ router.post('/complete-purchase', async (req, res) => {
     const sellerEarnings = productPrice;
 
     const walletRef = doc(db, 'wallets', sellerId);
-    await updateDoc(walletRef, {
-      availableBalance: firebase.firestore.FieldValue.increment(sellerEarnings),
+    await setDoc(walletRef, {
+      availableBalance: increment(sellerEarnings),
       updatedAt: serverTimestamp(),
     }, { merge: true });
 
     await addDoc(collection(db, 'transactions'), {
-      userId: sellerId,
+      sellerId,
       type: 'Sale',
       amount: sellerEarnings,
       fees,
@@ -788,9 +810,9 @@ router.post('/complete-purchase', async (req, res) => {
  */
 router.post('/initiate-seller-payout', async (req, res) => {
   try {
-    const { sellerId, amount } = req.body;
+    const { sellerId, amount, accountDetails } = req.body;
     if (!sellerId || !amount || amount <= 0) {
-      return res.status(400).json({ error: 'Missing sellerId or amount' });
+      return res.status(400).json({ error: 'Missing sellerId or invalid amount' });
     }
 
     const walletRef = doc(db, 'wallets', sellerId);
@@ -810,10 +832,10 @@ router.post('/initiate-seller-payout', async (req, res) => {
       return res.status(400).json({ error: 'Seller not found' });
     }
     const seller = sellerSnap.data();
-    const transactionReference = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    const transactionReference = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const transactionDoc = await addDoc(collection(db, 'transactions'), {
-      userId: sellerId,
+      sellerId,
       type: 'Withdrawal',
       description: `Withdrawal request for ${transactionReference} - Awaiting Admin Approval`,
       amount,
@@ -823,6 +845,15 @@ router.post('/initiate-seller-payout', async (req, res) => {
       reference: transactionReference,
       country: seller.country,
       paystackRecipientCode: seller.paystackRecipientCode,
+      bankName: accountDetails?.bankName || seller.bankName || 'N/A',
+      accountNumber: accountDetails?.accountNumber || seller.accountNumber || 'N/A',
+    });
+
+    await addDoc(collection(db, 'notifications'), {
+      type: 'payout_request',
+      message: `New payout request of ₦${amount.toFixed(2)} from seller ${sellerId}`,
+      createdAt: new Date(),
+      details: { transactionId: transactionDoc.id, sellerId },
     });
 
     res.json({
@@ -901,108 +932,147 @@ router.post('/approve-payout', async (req, res) => {
 
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists() || transactionSnap.data().status !== 'Pending') {
-      return res.status(400).json({ error: 'Invalid or non-pending transaction' });
+    if (!transactionSnap.exists()) {
+      return res.status(404).json({ error: 'Transaction not found' });
     }
-
-    const walletRef = doc(db, 'wallets', sellerId);
-    const walletSnap = await getDoc(walletRef);
-    if (!walletSnap.exists()) {
-      return res.status(400).json({ error: 'Wallet not found' });
+    const transactionData = transactionSnap.data();
+    if (transactionData.status !== 'Pending' && transactionData.status !== 'pending_otp') {
+      return res.status(400).json({ error: 'Invalid transaction status' });
     }
-    const wallet = walletSnap.data();
-    const amount = transactionSnap.data().amount;
-
-    if (wallet.availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient available balance for payout' });
-    }
+    const { amount, country, paystackRecipientCode } = transactionData;
 
     const sellerRef = doc(db, 'sellers', sellerId);
     const sellerSnap = await getDoc(sellerRef);
     if (!sellerSnap.exists()) {
-      return res.status(400).json({ error: 'Seller not found' });
+      return res.status(404).json({ error: 'Seller not found' });
     }
     const sellerData = sellerSnap.data();
-    const recipientCode = sellerData.paystackRecipientCode;
-    if (!recipientCode || typeof recipientCode !== 'string' || !recipientCode.startsWith('RCP_')) {
-      return res.status(400).json({ error: 'Invalid or missing Paystack recipient code' });
+
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    if (!walletSnap.exists()) {
+      return res.status(404).json({ error: 'Seller wallet not found' });
+    }
+    const walletData = walletSnap.data();
+    if (walletData.availableBalance < amount) {
+      return res.status(400).json({ error: 'Insufficient available balance for payout' });
     }
 
-    // Check Paystack balance
-    const balanceResponse = await axios.get('https://api.paystack.co/balance', {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    const availableBalance = balanceResponse.data.data[0].balance / 100; // Convert kobo to NGN
-    if (availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient Paystack balance for transfer' });
-    }
+    if (country === 'Nigeria') {
+      const recipientCode = paystackRecipientCode || sellerData.paystackRecipientCode;
+      if (!recipientCode) {
+        return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
+      }
 
-    console.log('Initiating transfer:', { amount, recipientCode, sellerId });
-    const transferResponse = await axios.post(
-      'https://api.paystack.co/transfer',
-      {
-        source: 'balance',
-        amount: Math.round(amount * 100),
-        recipient: recipientCode,
-        reason: `Withdrawal approval for ${transactionId}`,
-        metadata: { transactionId }, // Add metadata for webhook
-      },
-      {
+      const balanceResponse = await axios.get('https://api.paystack.co/balance', {
         headers: {
           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
           'Content-Type': 'application/json',
         },
-        timeout: 15000,
+      });
+      const availableBalance = balanceResponse.data.data[0].balance / 100;
+      if (availableBalance < amount) {
+        return res.status(400).json({ error: 'Insufficient Paystack balance for transfer' });
       }
-    );
 
-    if (transferResponse.data.status) {
-      // Verify transfer status immediately
-      const verifyResponse = await axios.get(
-        `https://api.paystack.co/transfer/verify/${transferResponse.data.data.reference}`,
+      const adminRef = doc(db, 'admin', 'settings');
+      const adminSnap = await getDoc(adminRef);
+      const otpEnabled = adminSnap.exists() && adminSnap.data().otpEnabled !== false;
+
+      const response = await axios.post(
+        'https://api.paystack.co/transfer',
+        {
+          source: 'balance',
+          amount: Math.round(amount * 100),
+          recipient: recipientCode,
+          reason: `Payout for transaction ${transactionId}`,
+          currency: 'NGN',
+          metadata: { transactionId },
+        },
         {
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             'Content-Type': 'application/json',
           },
+          timeout: 15000,
         }
       );
 
-      if (verifyResponse.data.data.status === 'success') {
+      if (otpEnabled && response.data.status && response.data.data.status === 'otp') {
+        await updateDoc(transactionRef, {
+          status: 'pending_otp',
+          transferCode: response.data.data.transfer_code,
+          updatedAt: serverTimestamp(),
+        });
+        const adminEmail = adminSnap.exists() ? adminSnap.data().email : 'emitexc.e.o1@gmail.com';
+        await addDoc(collection(db, 'notifications'), {
+          type: 'payout_otp',
+          message: `OTP sent for payout approval of ₦${amount.toFixed(2)} for transaction ${transactionId}`,
+          createdAt: new Date(),
+          details: { transactionId, sellerId, adminEmail },
+        });
+        res.status(200).json({
+          status: 'success',
+          message: `OTP sent to admin email for transaction ${transactionId}`,
+          transferCode: response.data.data.transfer_code,
+        });
+      } else if (response.data.status && response.data.data.status === 'success') {
         await updateDoc(walletRef, {
-          availableBalance: wallet.availableBalance - amount,
+          availableBalance: increment(-amount),
           updatedAt: serverTimestamp(),
         });
         await updateDoc(transactionRef, {
           status: 'Approved',
+          transferReference: response.data.data.reference,
           updatedAt: serverTimestamp(),
-          transferReference: transferResponse.data.data.reference,
+        });
+        await addDoc(collection(db, 'notifications'), {
+          type: 'payout_completed',
+          message: `Payout of ₦${amount.toFixed(2)} for transaction ${transactionId} completed`,
+          createdAt: new Date(),
+          details: { transactionId, sellerId, email: sellerData.email },
         });
         res.json({
           status: 'success',
-          reference: transferResponse.data.data.reference,
-          message: 'Payout processed and credited to seller account in real-time',
+          message: 'Payout processed and credited to seller account',
+          transferReference: response.data.data.reference,
         });
       } else {
-        await updateDoc(transactionRef, {
-          status: 'Pending',
-          updatedAt: serverTimestamp(),
-          transferReference: transferResponse.data.data.reference,
-          transferStatus: verifyResponse.data.data.status,
-        });
-        // Start polling as a fallback
-        pollTransferStatus(transferResponse.data.data.reference, transactionId);
-        res.json({
-          status: 'success',
-          reference: transferResponse.data.data.reference,
-          message: 'Payout initiated, awaiting bank confirmation',
-        });
+        throw new Error(response.data.message || 'Transfer initiation failed');
       }
+    } else if (country === 'United Kingdom') {
+      const stripeAccountId = sellerData.stripeAccountId;
+      if (!stripeAccountId) {
+        return res.status(400).json({ error: 'Seller has not completed Stripe onboarding' });
+      }
+      const transfer = await stripe.transfers.create({
+        amount: Math.round(amount * 100),
+        currency: 'gbp',
+        destination: stripeAccountId,
+        transfer_group: transactionId,
+      });
+      await updateDoc(walletRef, {
+        availableBalance: increment(-amount),
+        updatedAt: serverTimestamp(),
+      });
+      await updateDoc(transactionRef, {
+        status: 'Approved',
+        transferId: transfer.id,
+        updatedAt: serverTimestamp(),
+      });
+      await addDoc(collection(db, 'notifications'), {
+        type: 'payout_completed',
+        message: `Payout of £${amount.toFixed(2)} for transaction ${transactionId} completed`,
+        createdAt: new Date(),
+        details: { transactionId, sellerId, email: sellerData.email },
+      });
+      res.json({
+        status: 'success',
+        message: 'Payout processed for UK seller',
+        transferId: transfer.id,
+      });
     } else {
-      throw new Error(transferResponse.data.message || 'Transfer initiation failed');
+      return res.status(400).json({ error: 'Unsupported country' });
     }
   } catch (error) {
     console.error('Payout approval error:', error.response?.data || error.message);
@@ -1071,8 +1141,15 @@ router.post('/reject-payout', async (req, res) => {
 
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists() || transactionSnap.data().status !== 'Pending') {
+    if (!transactionSnap.exists() || !['Pending', 'pending_otp'].includes(transactionSnap.data().status)) {
       return res.status(400).json({ error: 'Invalid or non-pending transaction' });
+    }
+    const { amount } = transactionSnap.data();
+
+    const walletRef = doc(db, 'wallets', sellerId);
+    const walletSnap = await getDoc(walletRef);
+    if (!walletSnap.exists()) {
+      return res.status(404).json({ error: 'Seller wallet not found' });
     }
 
     await updateDoc(transactionRef, {
@@ -1080,9 +1157,25 @@ router.post('/reject-payout', async (req, res) => {
       updatedAt: serverTimestamp(),
     });
 
+    await updateDoc(walletRef, {
+      availableBalance: increment(amount),
+      updatedAt: serverTimestamp(),
+    });
+
+    const sellerRef = doc(db, 'sellers', sellerId);
+    const sellerSnap = await getDoc(sellerRef);
+    if (sellerSnap.exists() && sellerSnap.data().email) {
+      await addDoc(collection(db, 'notifications'), {
+        type: 'payout_rejected',
+        message: `Payout request of ₦${amount.toFixed(2)} for transaction ${transactionId} rejected and refunded to wallet`,
+        createdAt: new Date(),
+        details: { transactionId, sellerId, email: sellerSnap.data().email },
+      });
+    }
+
     res.json({
       status: 'success',
-      message: 'Payout rejected',
+      message: 'Payout rejected and amount refunded to seller wallet',
     });
   } catch (error) {
     console.error('Payout rejection error:', error);
@@ -1146,5 +1239,79 @@ async function pollTransferStatus(reference, transactionId, maxAttempts = 5, int
   }
   return false;
 }
+
+router.post('/paystack-webhook', async (req, res) => {
+  try {
+    const event = req.body;
+    const signature = req.headers['x-paystack-signature'];
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+
+    const crypto = require('crypto');
+    const hmac = crypto.createHmac('sha512', secret);
+    const expectedSignature = hmac.update(JSON.stringify(event)).digest('hex');
+    if (signature !== expectedSignature) {
+      console.error('Invalid webhook signature:', { received: signature, expected: expectedSignature });
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
+
+    if (event.event === 'transfer.success') {
+      const transactionRef = doc(db, 'transactions', event.data.metadata.transactionId);
+      const transactionSnap = await getDoc(transactionRef);
+      if (transactionSnap.exists()) {
+        const { sellerId, amount } = transactionSnap.data();
+        await updateDoc(transactionRef, {
+          status: 'Approved',
+          transferReference: event.data.reference,
+          updatedAt: serverTimestamp(),
+        });
+        const sellerRef = doc(db, 'sellers', sellerId);
+        const sellerSnap = await getDoc(sellerRef);
+        if (sellerSnap.exists() && sellerSnap.data().email) {
+          await addDoc(collection(db, 'notifications'), {
+            type: 'payout_completed',
+            message: `Payout of ₦${amount.toFixed(2)} for transaction ${event.data.metadata.transactionId} completed`,
+            createdAt: new Date(),
+            details: { transactionId: event.data.metadata.transactionId, sellerId, email: sellerSnap.data().email },
+          });
+        }
+      }
+    } else if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
+      const transactionRef = doc(db, 'transactions', event.data.metadata.transactionId);
+      const transactionSnap = await getDoc(transactionRef);
+      if (transactionSnap.exists()) {
+        const { sellerId, amount } = transactionSnap.data();
+        await updateDoc(transactionRef, {
+          status: 'Failed',
+          updatedAt: serverTimestamp(),
+          transferReference: event.data.reference,
+          failureReason: event.data.reason || 'Unknown reason',
+        });
+        const walletRef = doc(db, 'wallets', sellerId);
+        const walletSnap = await getDoc(walletRef);
+        if (walletSnap.exists()) {
+          await updateDoc(walletRef, {
+            availableBalance: increment(amount),
+            updatedAt: serverTimestamp(),
+          });
+        }
+        const sellerRef = doc(db, 'sellers', sellerId);
+        const sellerSnap = await getDoc(sellerRef);
+        if (sellerSnap.exists() && sellerSnap.data().email) {
+          await addDoc(collection(db, 'notifications'), {
+            type: 'payout_failed',
+            message: `Payout of ₦${amount.toFixed(2)} for transaction ${event.data.metadata.transactionId} failed and refunded to wallet`,
+            createdAt: new Date(),
+            details: { transactionId: event.data.metadata.transactionId, sellerId, email: sellerSnap.data().email },
+          });
+        }
+      }
+    }
+
+    res.status(200).json({ status: 'success', message: 'Webhook received' });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(500).json({ error: 'Failed to process webhook', details: error.message });
+  }
+});
 
 module.exports = router;

@@ -1,0 +1,96 @@
+0000000000000000000000000000000000000000 0d2e80010ef95511edaf4e62ea617b4f70080810 emmanuel nwafor <emitexc.e.o1@gmail.com> 1747796433 -0700	commit (initial): first-commit
+0d2e80010ef95511edaf4e62ea617b4f70080810 c54de7079dc36c96204e921b80f64717bcccc38d emmanuel nwafor <emitexc.e.o1@gmail.com> 1747797722 -0700	commit: second-commit
+c54de7079dc36c96204e921b80f64717bcccc38d 281c7e62fdc1ce4ca51f829ace3ff7f185ffc7a5 emmanuel nwafor <emitexc.e.o1@gmail.com> 1747822329 -0700	pull: Fast-forward
+281c7e62fdc1ce4ca51f829ace3ff7f185ffc7a5 ddeb45e7f4194bd208bd7370e6b208e31a06737c emmanuel nwafor <emitexc.e.o1@gmail.com> 1747865819 -0700	commit: All c ommit
+ddeb45e7f4194bd208bd7370e6b208e31a06737c a5073dee3d2fd5f36d83abba6477429486dd2312 emmanuel nwafor <emitexc.e.o1@gmail.com> 1747866128 -0700	commit: All commit
+a5073dee3d2fd5f36d83abba6477429486dd2312 4d55bdb1e569e174dc474436733c8a7716cf7ccc emmanuel nwafor <emitexc.e.o1@gmail.com> 1748336902 -0700	commit: all commit
+4d55bdb1e569e174dc474436733c8a7716cf7ccc 0a4878115339243ba378cbf2407c86913dc84f9e emmanuel nwafor <emitexc.e.o1@gmail.com> 1748554474 -0700	commit: all commit
+0a4878115339243ba378cbf2407c86913dc84f9e 4265030667e9c88d4d407d2714284ca85b1790ec emmanuel nwafor <emitexc.e.o1@gmail.com> 1748562664 -0700	commit: all commit
+4265030667e9c88d4d407d2714284ca85b1790ec 7c45c69257eb72ff6ec5dc1b445dd957a5b21437 emmanuel nwafor <emitexc.e.o1@gmail.com> 1748578409 -0700	commit: all commit
+7c45c69257eb72ff6ec5dc1b445dd957a5b21437 3926b945f08f8a65e3831de0df3149616fae56d3 emmanuel nwafor <emitexc.e.o1@gmail.com> 1748579575 -0700	commit: all commit
+3926b945f08f8a65e3831de0df3149616fae56d3 fafffe4e053d03dd23029a391a3abec3b528ed63 emmanuel nwafor <emitexc.e.o1@gmail.com> 1748607191 -0700	commit: all commit
+fafffe4e053d03dd23029a391a3abec3b528ed63 4f093c8d0b2c99f60a9e42786ee10a98ebe5b922 emmanuel nwafor <emitexc.e.o1@gmail.com> 1748609011 -0700	commit: all commit
+4f093c8d0b2c99f60a9e42786ee10a98ebe5b922 dc06debb341ab53aa624b82bb8e1dd5996ed0fc4 emmanuel nwafor <emitexc.e.o1@gmail.com> 1748926938 -0700	commit: wallet implemented
+dc06debb341ab53aa624b82bb8e1dd5996ed0fc4 0a2f95af4a8aa6ab1132888b64ba254266325464 emmanuel nwafor <emitexc.e.o1@gmail.com> 1748994878 -0700	commit: Withdrawal logic
+0a2f95af4a8aa6ab1132888b64ba254266325464 226054ea8a705a80beefca140e446993d0e918b8 emmanuel nwafor <emitexc.e.o1@gmail.com> 1748996403 -0700	commit: recent commit
+226054ea8a705a80beefca140e446993d0e918b8 3f35214ca375ee740e84d33650dafd6eb6429029 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749065946 -0700	commit: admin approval update
+3f35214ca375ee740e84d33650dafd6eb6429029 13c9a475677df7f25f1bb116b970360839881bd2 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749130647 -0700	commit: Updated wallet
+13c9a475677df7f25f1bb116b970360839881bd2 90fe2184f122ee0b7da7358486a020ded7971597 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749133042 -0700	commit: Wallte update
+90fe2184f122ee0b7da7358486a020ded7971597 03c83d46f5d35a2f8218d95323947224f0eff6a7 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749135151 -0700	commit: Updated
+03c83d46f5d35a2f8218d95323947224f0eff6a7 17f0f1956896c9c1d687e7a28ffbbf6caf49ba50 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749160085 -0700	commit: Recent commit
+17f0f1956896c9c1d687e7a28ffbbf6caf49ba50 ffff1d35ad6f803c5762b88f923f79ebc52dc58a emmanuel nwafor <emitexc.e.o1@gmail.com> 1749161992 -0700	commit: all commit
+ffff1d35ad6f803c5762b88f923f79ebc52dc58a cf2cd95873e21a75d05e6b1081ce7f3ab29af5bf emmanuel nwafor <emitexc.e.o1@gmail.com> 1749163612 -0700	commit: Testing the recent fix
+cf2cd95873e21a75d05e6b1081ce7f3ab29af5bf a71d3ebd07ee20c50fb67fecb0bf6b30a6b0cdf5 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749164591 -0700	commit: Analyzed paystack endpoint
+a71d3ebd07ee20c50fb67fecb0bf6b30a6b0cdf5 82914e2262175420f1e1ca865252955e095647e8 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749300356 -0700	commit: Just commited
+82914e2262175420f1e1ca865252955e095647e8 b2e0027dc9ea485a05d06b073a1d81d600de4e18 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749301597 -0700	commit: all commit
+b2e0027dc9ea485a05d06b073a1d81d600de4e18 28ef3c8752ebde2941080d47c86267d7dabffa33 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749499907 -0700	commit: all commit
+28ef3c8752ebde2941080d47c86267d7dabffa33 cb044e352af52bce54e47ff7e5ed1edd0e27bea4 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749500318 -0700	commit: git push
+cb044e352af52bce54e47ff7e5ed1edd0e27bea4 7c9ed4debfc6afe1eb13328ac60e8fa4b1025081 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749501005 -0700	commit: initiated-paystack-payment fixed
+7c9ed4debfc6afe1eb13328ac60e8fa4b1025081 6694afbc8c5fc109d3752f4c559335726650c422 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749594941 -0700	commit: New commit
+6694afbc8c5fc109d3752f4c559335726650c422 43bb2dbbf8e5e0b2daeae8c3fc5072cca63297dd emmanuel nwafor <emitexc.e.o1@gmail.com> 1749919456 -0700	commit: Backed up server.js
+43bb2dbbf8e5e0b2daeae8c3fc5072cca63297dd ee85ab72dac6f9a6b78f1e7d9710b6143c4efe75 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749922446 -0700	commit: Just commited
+ee85ab72dac6f9a6b78f1e7d9710b6143c4efe75 513b9c76f74712afce01c36d867bccc1db8929e4 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749925339 -0700	commit: recaptcha updated
+513b9c76f74712afce01c36d867bccc1db8929e4 25bae6894937149b226bac55bca4e6c2a3b702d6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749950294 -0700	commit: updated notifications
+25bae6894937149b226bac55bca4e6c2a3b702d6 26f9e1a1c3693ca6fcc28e29911c990ed22399ed emmanuel nwafor <emitexc.e.o1@gmail.com> 1749955158 -0700	commit: updated email message
+26f9e1a1c3693ca6fcc28e29911c990ed22399ed 24a5ff9dffc80122119aa102aaed57dc62436fd5 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749960957 -0700	commit: Fix Firestore and email errors
+24a5ff9dffc80122119aa102aaed57dc62436fd5 dbe866e13a1731b5781dbbecaaf07071dac6daae emmanuel nwafor <emitexc.e.o1@gmail.com> 1749962025 -0700	commit: all commit
+dbe866e13a1731b5781dbbecaaf07071dac6daae 049776130713113c8a4e16e1e9dffa0c523e43cf emmanuel nwafor <emitexc.e.o1@gmail.com> 1749968301 -0700	commit: updated mail
+049776130713113c8a4e16e1e9dffa0c523e43cf 19710d44a96410e327f21b0398a3a7511db3bff8 emmanuel nwafor <emitexc.e.o1@gmail.com> 1749970211 -0700	commit: just commited
+19710d44a96410e327f21b0398a3a7511db3bff8 626b1bbf8e26ad72ecd4c71941f625512d6b4101 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750001323 -0700	commit: Upgraded Checkout
+626b1bbf8e26ad72ecd4c71941f625512d6b4101 0e88b9754f181b8e5a19dc99ab054dcd0c90b797 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750022183 -0700	commit: Latest update
+0e88b9754f181b8e5a19dc99ab054dcd0c90b797 d24a75b17d7b1f294061f4b53b9dc52417d5e692 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750022305 -0700	commit: latest commit2
+d24a75b17d7b1f294061f4b53b9dc52417d5e692 bed20a1bc0b4e5fcd01c503714c64e25abf7db4a emmanuel nwafor <emitexc.e.o1@gmail.com> 1750209713 -0700	commit: Well structured server
+bed20a1bc0b4e5fcd01c503714c64e25abf7db4a 04c5859bf7ef9ddf04dc82eee27ab538cda3e17f emmanuel nwafor <emitexc.e.o1@gmail.com> 1750211489 -0700	commit: reverted server.js
+04c5859bf7ef9ddf04dc82eee27ab538cda3e17f 8eda36cab6a773b60c433314888b9f407335c5d4 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750275191 -0700	commit: Recent commit
+8eda36cab6a773b60c433314888b9f407335c5d4 94105c8c6b988d57a6a71d1eeee0c5c15344f7d8 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750277896 -0700	commit: reverted server
+94105c8c6b988d57a6a71d1eeee0c5c15344f7d8 f5226df60022f58e1312a023add108df457a8155 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750278773 -0700	commit: updated /send-order-confirmation endpoint
+f5226df60022f58e1312a023add108df457a8155 b235b151e2e1134beee63a224ad2d4cb29b90ab8 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750280609 -0700	commit: updated order confirmation email
+b235b151e2e1134beee63a224ad2d4cb29b90ab8 4f70a2259fe859bce61c3266290dac413885a3f6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750282578 -0700	commit: Just updated
+4f70a2259fe859bce61c3266290dac413885a3f6 df19d69fb9ee81d8cc7bf4c11b377cec72cd8c59 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750283721 -0700	commit: Updated recent server
+df19d69fb9ee81d8cc7bf4c11b377cec72cd8c59 94687da57f28b6b398778d037a23e04d6f2453d4 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750433064 -0700	commit: all commit
+94687da57f28b6b398778d037a23e04d6f2453d4 51c8ac8cb7322c96362e75bce9798b4cbd542deb emmanuel nwafor <emitexc.e.o1@gmail.com> 1750543351 -0700	commit: Just commited
+51c8ac8cb7322c96362e75bce9798b4cbd542deb 1f0711c11997d4610a8a24a54fd10c7581f5ee74 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750698814 -0700	commit: Committed committed
+1f0711c11997d4610a8a24a54fd10c7581f5ee74 197cef8915a8c8b05cb38cd53f529dfefe17a841 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750716419 -0700	commit: Committed
+197cef8915a8c8b05cb38cd53f529dfefe17a841 461905ebf047a9433f2579f9b48e30cfdff11c2f emmanuel nwafor <emitexc.e.o1@gmail.com> 1750717825 -0700	commit: Reverted commit
+461905ebf047a9433f2579f9b48e30cfdff11c2f 9542abdf34cec85db80a4ba747a25fb64ea3f064 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750718269 -0700	commit: Updated server.js
+9542abdf34cec85db80a4ba747a25fb64ea3f064 877845c174f5c8c78747541135487d2f03c14dd8 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750727131 -0700	commit: Com com
+877845c174f5c8c78747541135487d2f03c14dd8 236d15f34fd7a4e117de520d90147024d20bc5c8 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750729118 -0700	commit: Updated server.js
+236d15f34fd7a4e117de520d90147024d20bc5c8 3523b529461e81e4188cb5d4c5aea5922cc952d1 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750736682 -0700	commit: Commit commit
+3523b529461e81e4188cb5d4c5aea5922cc952d1 95574d992cf1d00263b0c9d6cdcdb0aed41acc0c emmanuel nwafor <emitexc.e.o1@gmail.com> 1750740604 -0700	commit: cmcm
+95574d992cf1d00263b0c9d6cdcdb0aed41acc0c 532586bedccc89c4cee9ff198bbcb840a94e70de emmanuel nwafor <emitexc.e.o1@gmail.com> 1750740853 -0700	commit: committed
+532586bedccc89c4cee9ff198bbcb840a94e70de 1f8d747fa220cc2c95308bd1f70df012d5d6bd62 emmanuel nwafor <emitexc.e.o1@gmail.com> 1750990070 -0700	commit: Updated server structure, not at its best yet, but better
+1f8d747fa220cc2c95308bd1f70df012d5d6bd62 df9f4fb95c824808dfa92277609904c6860b9d5e emmanuel nwafor <emitexc.e.o1@gmail.com> 1750990437 -0700	commit: Updated server.js
+df9f4fb95c824808dfa92277609904c6860b9d5e bf42529a9cc2130690dc6190f093f98f403abf0a emmanuel nwafor <emitexc.e.o1@gmail.com> 1751154309 -0700	commit: erver.js
+bf42529a9cc2130690dc6190f093f98f403abf0a 149ba9330f6e6f577b782a5277818664770e6329 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751155264 -0700	commit: Removed chunk
+149ba9330f6e6f577b782a5277818664770e6329 b2cab3264400b62be002918dfcebf1d39b797ba3 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751234841 -0700	commit: updated
+b2cab3264400b62be002918dfcebf1d39b797ba3 befe4a9683b190e0eda17e4df01d6f9d4916e545 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751238415 -0700	commit: updated bank routes
+befe4a9683b190e0eda17e4df01d6f9d4916e545 2527d84c4eea1a9434f04b1aaf2b3155116ac55f emmanuel nwafor <emitexc.e.o1@gmail.com> 1751241351 -0700	commit: bank update
+2527d84c4eea1a9434f04b1aaf2b3155116ac55f 8f386afed5577efd3f43e675ff411d406bb29331 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751307557 -0700	commit: updated sellerRoutes.js
+8f386afed5577efd3f43e675ff411d406bb29331 2d77e408609e2d7a151f920b612219e0b3b99ede emmanuel nwafor <emitexc.e.o1@gmail.com> 1751327418 -0700	commit: Save my changes to sellerRoutes.js
+2d77e408609e2d7a151f920b612219e0b3b99ede 92c6cd4cad1289228f01d320103d3c0605a6645e emmanuel nwafor <emitexc.e.o1@gmail.com> 1751327441 -0700	checkout: moving from main to update
+92c6cd4cad1289228f01d320103d3c0605a6645e be8e558766c513b484e6f346d3f6680d0b99fc5b emmanuel nwafor <emitexc.e.o1@gmail.com> 1751327786 -0700	commit: Removed Swagger docs and fixed code
+be8e558766c513b484e6f346d3f6680d0b99fc5b e1a8a1d4415ac400b777312acec6ed10d31fa715 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751329020 -0700	commit: added updated sellers routes
+e1a8a1d4415ac400b777312acec6ed10d31fa715 d30e7a5a16a1f5de846fc0e8d1ac45dbd422a7b3 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751411906 -0700	commit: updated sellerRoutes.js
+d30e7a5a16a1f5de846fc0e8d1ac45dbd422a7b3 8ac2af89d2740cd70e8d55d1cb2af40f32d5e301 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751422226 -0700	commit: commit commit
+8ac2af89d2740cd70e8d55d1cb2af40f32d5e301 aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751481045 -0700	commit: Updatedd
+aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751494923 -0700	checkout: moving from update to update
+aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751495047 -0700	checkout: moving from update to update
+aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 2d77e408609e2d7a151f920b612219e0b3b99ede emmanuel nwafor <emitexc.e.o1@gmail.com> 1751495275 -0700	checkout: moving from update to main
+2d77e408609e2d7a151f920b612219e0b3b99ede aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751495345 -0700	checkout: moving from main to update
+aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 2d77e408609e2d7a151f920b612219e0b3b99ede emmanuel nwafor <emitexc.e.o1@gmail.com> 1751495390 -0700	checkout: moving from update to main
+2d77e408609e2d7a151f920b612219e0b3b99ede 1b301bf019c2d023bbecd49b00dd5bd6de9ad73a emmanuel nwafor <emitexc.e.o1@gmail.com> 1751495472 -0700	commit: Switched to main branch
+1b301bf019c2d023bbecd49b00dd5bd6de9ad73a 4251dba147ab41d267c813671e24b5523c48c463 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751516445 -0700	commit: updated approve endpoint
+4251dba147ab41d267c813671e24b5523c48c463 418bdb58b99c20900daeb2795c676be6f6f2fb04 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751835472 -0700	commit: sellerRoutes.js updated
+418bdb58b99c20900daeb2795c676be6f6f2fb04 aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751868542 -0700	checkout: moving from main to update
+aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 418bdb58b99c20900daeb2795c676be6f6f2fb04 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751868579 -0700	checkout: moving from update to main
+418bdb58b99c20900daeb2795c676be6f6f2fb04 aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751868823 -0700	checkout: moving from main to update
+aa073b90ceea4af0e73e0ad6176a0e81e9682bb6 26fc5240ab736df176bd0507472fc341eaca051e emmanuel nwafor <emitexc.e.o1@gmail.com> 1751869043 -0700	commit: switched
+26fc5240ab736df176bd0507472fc341eaca051e 418bdb58b99c20900daeb2795c676be6f6f2fb04 emmanuel nwafor <emitexc.e.o1@gmail.com> 1751869500 -0700	checkout: moving from update to main
+418bdb58b99c20900daeb2795c676be6f6f2fb04 5008d89d32bbbb2c35314a1706facc8b44ca74cc emmanuel nwafor <emitexc.e.o1@gmail.com> 1751927301 -0700	commit: updated email routes
+5008d89d32bbbb2c35314a1706facc8b44ca74cc 26fc5240ab736df176bd0507472fc341eaca051e emmanuel nwafor <emitexc.e.o1@gmail.com> 1751928852 -0700	checkout: moving from main to update
+26fc5240ab736df176bd0507472fc341eaca051e 5008d89d32bbbb2c35314a1706facc8b44ca74cc emmanuel nwafor <emitexc.e.o1@gmail.com> 1751929070 -0700	checkout: moving from update to main
+5008d89d32bbbb2c35314a1706facc8b44ca74cc 1be5e0e1108eff38ea53f35886f5ab49ece48b05 emmanuel nwafor <emitexc.e.o1@gmail.com> 1752157214 -0700	commit: updated paymentRoutes
+1be5e0e1108eff38ea53f35886f5ab49ece48b05 26fc5240ab736df176bd0507472fc341eaca051e emmanuel nwafor <emitexc.e.o1@gmail.com> 1752157225 -0700	checkout: moving from main to update
+26fc5240ab736df176bd0507472fc341eaca051e 1be5e0e1108eff38ea53f35886f5ab49ece48b05 emmanuel nwafor <emitexc.e.o1@gmail.com> 1752157323 -0700	checkout: moving from update to main
+1be5e0e1108eff38ea53f35886f5ab49ece48b05 26fc5240ab736df176bd0507472fc341eaca051e emmanuel nwafor <emitexc.e.o1@gmail.com> 1752157431 -0700	checkout: moving from main to update
+26fc5240ab736df176bd0507472fc341eaca051e 1be5e0e1108eff38ea53f35886f5ab49ece48b05 emmanuel nwafor <emitexc.e.o1@gmail.com> 1752157978 -0700	checkout: moving from update to main
