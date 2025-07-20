@@ -5,99 +5,6 @@ const axios = require('axios');
 const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection } = require('firebase/firestore');
 const router = express.Router();
 
-/**
- * @swagger
- * /onboard-seller:
- *   post:
- *     summary: Onboard seller for payments
- *     description: Set up seller account for receiving payments via Stripe (UK) or Paystack (Nigeria)
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - userId
- *               - country
- *               - fullName
- *             properties:
- *               userId:
- *                 type: string
- *                 description: User ID
- *                 example: "user123"
- *               country:
- *                 type: string
- *                 enum: [Nigeria, United Kingdom]
- *                 description: Seller's country
- *                 example: "Nigeria"
- *               fullName:
- *                 type: string
- *                 description: Seller's full name
- *                 example: "John Doe"
- *               bankCode:
- *                 type: string
- *                 description: Bank code (required for Nigeria)
- *                 example: "044"
- *               accountNumber:
- *                 type: string
- *                 description: Bank account number (required for Nigeria)
- *                 example: "0123456789"
- *               email:
- *                 type: string
- *                 format: email
- *                 description: Email address (required for UK)
- *                 example: "seller@example.com"
- *               iban:
- *                 type: string
- *                 description: IBAN (required for UK)
- *                 example: "GB33BUKB20201555555555"
- *               bankName:
- *                 type: string
- *                 description: Bank name (required for UK)
- *                 example: "Barclays"
- *               idNumber:
- *                 type: string
- *                 description: ID number (required for UK)
- *                 example: "123456789"
- *     responses:
- *       200:
- *         description: Seller onboarded successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   description: Indicates successful onboarding
- *                   example: true
- *                 recipientCode:
- *                   type: string
- *                   description: Paystack recipient code (Nigeria)
- *                   example: "RCP_1234567890"
- *                 stripeAccountId:
- *                   type: string
- *                   description: Stripe account ID (UK)
- *                   example: "acct_1234567890"
- *                 redirectUrl:
- *                   type: string
- *                   description: Stripe onboarding URL (UK)
- *                   example: "https://connect.stripe.com/setup/s/1234567890"
- *       400:
- *         description: Invalid request data
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post('/onboard-seller', async (req, res) => {
   try {
     const { userId, fullName, bankCode, accountNumber, country, email, iban, bankName, idNumber } = req.body;
@@ -239,63 +146,6 @@ router.post('/onboard-seller', async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /complete-purchase:
- *   post:
- *     summary: Complete a purchase and credit seller
- *     description: Process a purchase and credit the seller's available balance
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - sellerId
- *               - amount
- *               - productPrice
- *             properties:
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *               amount:
- *                 type: number
- *                 description: Total purchase amount
- *                 example: 11000
- *               productPrice:
- *                 type: number
- *                 description: Original product price
- *                 example: 10000
- *     responses:
- *       200:
- *         description: Purchase completed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "Purchase completed, seller credited"
- *       400:
- *         description: Invalid request data
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post('/complete-purchase', async (req, res) => {
   try {
     const { sellerId, amount, productPrice } = req.body;
@@ -313,7 +163,7 @@ router.post('/complete-purchase', async (req, res) => {
     }, { merge: true });
 
     await addDoc(collection(db, 'transactions'), {
-      userId: sellerId,
+      sellerId,
       type: 'Sale',
       amount: sellerEarnings,
       fees,
@@ -328,62 +178,6 @@ router.post('/complete-purchase', async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /initiate-seller-payout:
- *   post:
- *     summary: Initiate seller payout
- *     description: Create a pending payout request for Nigeria (Paystack) or UK (Stripe)
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - sellerId
- *               - amount
- *             properties:
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *               amount:
- *                 type: number
- *                 description: Payout amount
- *                 example: 50000
- *     responses:
- *       200:
- *         description: Payout request created
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 transactionId:
- *                   type: string
- *                   description: Transaction ID
- *                   example: "transaction123"
- *                 message:
- *                   type: string
- *                   example: "Withdrawal request submitted, awaiting admin approval"
- *       400:
- *         description: Invalid request or insufficient balance
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post('/initiate-seller-payout', async (req, res) => {
   try {
     const { sellerId, amount } = req.body;
@@ -410,7 +204,7 @@ router.post('/initiate-seller-payout', async (req, res) => {
 
     const transactionReference = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const transactionDoc = await addDoc(collection(db, 'transactions'), {
-      userId: sellerId,
+      sellerId,
       type: 'Withdrawal',
       description: `Withdrawal request for ${transactionReference} - Awaiting Admin Approval`,
       amount,
@@ -440,66 +234,26 @@ router.post('/initiate-seller-payout', async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /approve-payout:
- *   post:
- *     summary: Approve seller payout
- *     description: Initiate Paystack transfer with OTP for Nigeria or Stripe transfer for UK
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - sellerId
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: Transaction ID
- *                 example: "transaction123"
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *     responses:
- *       200:
- *         description: Payout initiated, OTP sent to admin or completed
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "OTP sent to admin email for transaction"
- *                 transferCode:
- *                   type: string
- *                   description: Paystack transfer code (Nigeria)
- *                   example: "TRF_1234567890"
- *                 transferId:
- *                   type: string
- *                   description: Stripe transfer ID (UK)
- *                   example: "tr_1234567890"
- *       400:
- *         description: Invalid request or transaction not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
+router.post('/toggle-otp', async (req, res) => {
+  try {
+    const { otpEnabled } = req.body;
+    if (typeof otpEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'otpEnabled must be a boolean' });
+    }
+
+    const adminRef = doc(db, 'admin', 'settings');
+    await setDoc(adminRef, { otpEnabled }, { merge: true });
+
+    res.json({
+      status: 'success',
+      message: `OTP for transfers ${otpEnabled ? 'enabled' : 'disabled'}`,
+    });
+  } catch (error) {
+    console.error('Toggle OTP error:', error);
+    res.status(500).json({ error: 'Failed to toggle OTP', details: error.message });
+  }
+});
+
 router.post('/approve-payout', async (req, res) => {
   try {
     const { transactionId, sellerId } = req.body;
@@ -513,7 +267,7 @@ router.post('/approve-payout', async (req, res) => {
       return res.status(404).json({ error: 'Transaction not found' });
     }
     const transactionData = transactionSnap.data();
-    if (transactionData.status !== 'Pending') {
+    if (transactionData.status !== 'Pending' && transactionData.status !== 'pending_otp') {
       return res.status(400).json({ error: 'Invalid transaction status' });
     }
     const { amount, country, paystackRecipientCode } = transactionData;
@@ -552,6 +306,10 @@ router.post('/approve-payout', async (req, res) => {
         return res.status(400).json({ error: 'Insufficient Paystack balance for transfer' });
       }
 
+      const adminRef = doc(db, 'admin', 'settings');
+      const adminSnap = await getDoc(adminRef);
+      const otpEnabled = adminSnap.exists() && adminSnap.data().otpEnabled !== false;
+
       const response = await axios.post(
         'https://api.paystack.co/transfer',
         {
@@ -571,16 +329,14 @@ router.post('/approve-payout', async (req, res) => {
         }
       );
 
-      console.log('Approve payout Paystack response:', JSON.stringify(response.data, null, 2)); // Debug log
+      console.log('Approve payout Paystack response:', JSON.stringify(response.data, null, 2));
 
-      if (response.data.status && response.data.data.status === 'otp') {
+      if (otpEnabled && response.data.status && response.data.data.status === 'otp') {
         await updateDoc(transactionRef, {
           status: 'pending_otp',
           transferCode: response.data.data.transfer_code,
           updatedAt: serverTimestamp(),
         });
-        const adminRef = doc(db, 'admin', 'settings');
-        const adminSnap = await getDoc(adminRef);
         const adminEmail = adminSnap.exists() ? adminSnap.data().email : 'emitexc.e.o1@gmail.com';
         await addDoc(collection(db, 'notifications'), {
           type: 'payout_otp',
@@ -612,7 +368,7 @@ router.post('/approve-payout', async (req, res) => {
         res.json({
           status: 'success',
           message: 'Payout processed and credited to seller account',
-          transferCode: response.data.data.reference,
+          transferReference: response.data.data.reference,
         });
       } else {
         throw new Error(response.data.message || 'Transfer initiation failed');
@@ -657,376 +413,6 @@ router.post('/approve-payout', async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /verify-transfer-otp:
- *   post:
- *     summary: Verify OTP to finalize Paystack payout
- *     description: Verifies OTP for Nigeria payout and credits seller's bank account in real-time
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - otp
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: Transaction ID
- *                 example: "transaction123"
- *               otp:
- *                 type: string
- *                 description: OTP received by admin
- *                 example: "123456"
- *     responses:
- *       200:
- *         description: Payout finalized successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "Payout completed successfully"
- *       400:
- *         description: Invalid request or OTP
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.post('/verify-transfer-otp', async (req, res) => {
-  try {
-    const { transactionId, otp } = req.body;
-    console.log('Request body:', { transactionId, otp }); // Debug log: Verify input
-
-    if (!transactionId || !otp) {
-      return res.status(400).json({ error: 'Missing transactionId or OTP' });
-    }
-
-    // Fetch transaction
-    const transactionRef = doc(db, 'transactions', transactionId);
-    const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists()) {
-      console.log('Transaction not found:', transactionId); // Debug log
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    const transactionData = transactionSnap.data();
-    console.log('Transaction data:', transactionData); // Debug log: Check transaction fields
-
-    const { transferCode, sellerId, amount } = transactionData; // Use sellerId
-    if (!transferCode || !sellerId || !amount) {
-      console.log('Missing transaction fields:', { transferCode, sellerId, amount }); // Debug log
-      return res.status(400).json({
-        error: 'Missing required transaction fields',
-        details: { transferCode, sellerId, amount },
-      });
-    }
-
-    // Fetch wallet
-    const walletRef = doc(db, 'wallets', sellerId);
-    const walletSnap = await getDoc(walletRef);
-    if (!walletSnap.exists()) {
-      console.log('Wallet not found:', sellerId); // Debug log
-      return res.status(404).json({ error: 'Seller wallet not found' });
-    }
-    const walletData = walletSnap.data();
-    console.log('Wallet data:', walletData); // Debug log: Check wallet fields
-    if (typeof walletData.availableBalance !== 'number' || walletData.availableBalance < amount) {
-      console.log('Invalid wallet balance:', { availableBalance: walletData.availableBalance, amount }); // Debug log
-      return res.status(400).json({ error: 'Insufficient available balance for payout' });
-    }
-
-    // Call Paystack
-    console.log('Calling Paystack with:', { transfer_code: transferCode, otp }); // Debug log: Before API call
-    const response = await axios.post(
-      'https://api.paystack.co/transfer/finalize_transfer',
-      {
-        transfer_code: transferCode,
-        otp,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    console.log('Paystack response:', JSON.stringify(response.data, null, 2)); // Debug log: Full response
-
-    if (!response.data || !response.data.data || typeof response.data.status !== 'boolean') {
-      console.log('Invalid Paystack response structure:', response.data); // Debug log
-      throw new Error('Invalid Paystack response structure');
-    }
-
-    if (response.data.status && response.data.data.status === 'success') {
-      await updateDoc(walletRef, {
-        availableBalance: walletData.availableBalance - amount,
-        updatedAt: serverTimestamp(),
-      });
-      await updateDoc(transactionRef, {
-        status: 'Approved',
-        transferReference: response.data.data.reference || 'N/A',
-        completedAt: serverTimestamp(),
-      });
-      const sellerRef = doc(db, 'sellers', sellerId);
-      const sellerSnap = await getDoc(sellerRef);
-      console.log('Seller data:', sellerSnap.exists() ? sellerSnap.data() : 'Not found'); // Debug log
-      if (sellerSnap.exists() && sellerSnap.data().email) {
-        await addDoc(collection(db, 'notifications'), {
-          type: 'payout_completed',
-          message: `Payout of ₦${amount.toFixed(2)} for transaction ${transactionId} completed`,
-          createdAt: new Date(),
-          details: { transactionId, sellerId, email: sellerSnap.data().email },
-        });
-      }
-      res.status(200).json({ status: 'success', message: 'Payout completed successfully' });
-    } else {
-      console.log('Paystack failure:', response.data.message || 'No message provided'); // Debug log
-      throw new Error(response.data.message || 'OTP verification failed');
-    }
-  } catch (error) {
-    console.error('Verify OTP error:', {
-      message: error.message,
-      stack: error.stack,
-      response: error.response?.data ? JSON.stringify(error.response.data, null, 2) : 'No response data',
-    }); // Detailed error log
-    const errorMessage = error.response?.data?.message || error.message;
-    if (errorMessage.includes('OTP has expired') || errorMessage.includes('OTP could not be verified')) {
-      res.status(400).json({
-        error: 'Invalid or expired OTP',
-        details: 'Please click "Resend OTP" to receive a new OTP.',
-      });
-    } else {
-      res.status(500).json({
-        error: 'Failed to verify OTP',
-        details: errorMessage,
-      });
-    }
-  }
-});
-
-/**
- * @swagger
- * /resend-otp:
- *   post:
- *     summary: Resend OTP for Paystack payout
- *     description: Resend OTP for a pending Paystack payout transaction
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - sellerId
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: Transaction ID
- *                 example: "transaction123"
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *     responses:
- *       200:
- *         description: OTP resent successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "New OTP sent to admin email"
- *                 transferCode:
- *                   type: string
- *                   description: New Paystack transfer code
- *                   example: "TRF_1234567890"
- *       400:
- *         description: Invalid request or transaction not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.post('/resend-otp', async (req, res) => {
-  try {
-    const { transactionId, sellerId } = req.body;
-    if (!transactionId || !sellerId) {
-      return res.status(400).json({ error: 'Missing transactionId or sellerId' });
-    }
-
-    const transactionRef = doc(db, 'transactions', transactionId);
-    const transactionSnap = await getDoc(transactionRef);
-    if (!transactionSnap.exists()) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    const { amount, country, status, paystackRecipientCode } = transactionSnap.data();
-    if (status !== 'pending_otp') {
-      return res.status(400).json({ error: 'Transaction not in pending_otp status' });
-    }
-    if (country !== 'Nigeria') {
-      return res.status(400).json({ error: 'Resend OTP only supported for Nigeria' });
-    }
-
-    const sellerRef = doc(db, 'sellers', sellerId);
-    const sellerSnap = await getDoc(sellerRef);
-    if (!sellerSnap.exists()) {
-      return res.status(404).json({ error: 'Seller not found' });
-    }
-    const recipientCode = paystackRecipientCode || sellerSnap.data().paystackRecipientCode;
-    if (!recipientCode) {
-      return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
-    }
-
-    const walletRef = doc(db, 'wallets', sellerId);
-    const walletSnap = await getDoc(walletRef);
-    if (!walletSnap.exists()) {
-      return res.status(404).json({ error: 'Seller wallet not found' });
-    }
-    if (walletSnap.data().availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient available balance for payout' });
-    }
-
-    const balanceResponse = await axios.get('https://api.paystack.co/balance', {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    const availableBalance = balanceResponse.data.data[0].balance / 100;
-    if (availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient Paystack balance for transfer' });
-    }
-
-    const response = await axios.post(
-      'https://api.paystack.co/transfer',
-      {
-        source: 'balance',
-        amount: Math.round(amount * 100),
-        recipient: recipientCode,
-        reason: `Payout for transaction ${transactionId} (Resend OTP)`,
-        currency: 'NGN',
-        metadata: { transactionId },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    console.log('Resend OTP Paystack response:', JSON.stringify(response.data, null, 2)); // Debug log
-
-    if (response.data.status && response.data.data.status === 'otp') {
-      await updateDoc(transactionRef, {
-        transferCode: response.data.data.transfer_code,
-        updatedAt: serverTimestamp(),
-      });
-      const adminRef = doc(db, 'admin', 'settings');
-      const adminSnap = await getDoc(adminRef);
-      const adminEmail = adminSnap.exists() ? adminSnap.data().email : 'emitexc.e.o1@gmail.com';
-      await addDoc(collection(db, 'notifications'), {
-        type: 'payout_otp',
-        message: `New OTP sent for payout approval of ₦${amount.toFixed(2)} for transaction ${transactionId}`,
-        createdAt: new Date(),
-        details: { transactionId, sellerId, adminEmail },
-      });
-      res.status(200).json({
-        status: 'success',
-        message: 'New OTP sent to admin email',
-        transferCode: response.data.data.transfer_code,
-      });
-    } else {
-      throw new Error(response.data.message || 'Failed to resend OTP');
-    }
-  } catch (error) {
-    console.error('Resend OTP error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to resend OTP', details: error.response?.data?.message || error.message });
-  }
-});
-
-/**
- * @swagger
- * /reject-payout:
- *   post:
- *     summary: Reject seller payout
- *     description: Reject a seller payout request
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - transactionId
- *               - sellerId
- *             properties:
- *               transactionId:
- *                 type: string
- *                 description: Transaction ID
- *                 example: "transaction123"
- *               sellerId:
- *                 type: string
- *                 description: Seller ID
- *                 example: "seller123"
- *     responses:
- *       200:
- *         description: Payout rejected successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "Payout rejected"
- *       400:
- *         description: Invalid request or transaction not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post('/reject-payout', async (req, res) => {
   try {
     const { transactionId, sellerId } = req.body;
@@ -1066,60 +452,6 @@ router.post('/reject-payout', async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /paystack-webhook:
- *   post:
- *     summary: Handle Paystack webhook events
- *     description: Process Paystack webhook events for transfer updates
- *     tags: [Seller Management]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               event:
- *                 type: string
- *                 description: Webhook event type
- *                 example: "transfer.success"
- *               data:
- *                 type: object
- *                 description: Event data
- *                 example:
- *                   reference: "TRF_1234567890"
- *                   metadata:
- *                     transactionId: "transaction123"
- *                   status: "success"
- *                   reason: "Transfer completed"
- *     responses:
- *       200:
- *         description: Webhook processed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 message:
- *                   type: string
- *                   example: "Webhook received"
- *       400:
- *         description: Invalid webhook signature
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
 router.post('/paystack-webhook', async (req, res) => {
   try {
     const event = req.body;
@@ -1174,7 +506,7 @@ router.post('/paystack-webhook', async (req, res) => {
           status: 'Failed',
           updatedAt: serverTimestamp(),
           transferReference: event.data.reference,
-          failureReason: error.data.reason,
+          failureReason: event.data.reason || 'Unknown reason',
         });
         console.log(`Transfer ${event.data.reference} failed for transaction ${event.data.metadata.transactionId}: ${event.data.reason}`);
       }
