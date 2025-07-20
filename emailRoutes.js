@@ -1,7 +1,7 @@
 const express = require('express');
 const nodemailer = require('nodemailer');
 const { db } = require('./firebaseConfig');
-const { doc, getDoc, updateDoc, serverTimestamp } = require('firebase/firestore');
+const { doc, getDoc, updateDoc, serverTimestamp, collection, getDocs } = require('firebase/firestore');
 const router = express.Router();
 const emailService = require('./emailService');
 
@@ -117,6 +117,11 @@ router.post('/send-product-approved-email', async (req, res) => {
       console.warn(`Product ${productId} not found in Firestore`);
       return res.status(404).json({ error: 'Product not found' });
     }
+    const productData = productSnap.data();
+    if (productData.approvalEmailSent) {
+      console.log(`Approval email already sent to ${email} for product ${productId}`);
+      return res.json({ status: 'success', message: 'Approval email already sent to seller' });
+    }
 
     await emailService.sendProductApprovedEmail({ productId, productName, sellerId, sellerEmail });
     console.log(`Approval email sent to ${email} for product ${productId}`);
@@ -124,6 +129,7 @@ router.post('/send-product-approved-email', async (req, res) => {
     await updateDoc(productRef, {
       status: 'approved',
       updatedAt: serverTimestamp(),
+      approvalEmailSent: true
     });
 
     res.json({ status: 'success', message: 'Approval email sent to seller' });
@@ -246,6 +252,11 @@ router.post('/send-product-rejected-email', async (req, res) => {
       console.warn(`Product ${productId} not found in Firestore`);
       return res.status(404).json({ error: 'Product not found' });
     }
+    const productData = productSnap.data();
+    if (productData.rejectionEmailSent) {
+      console.log(`Rejection email already sent to ${email} for product ${productId}`);
+      return res.json({ status: 'success', message: 'Rejection email already sent to seller' });
+    }
 
     await emailService.sendProductRejectedEmail({ productId, productName, sellerId, sellerEmail, reason });
     console.log(`Rejection email sent to ${email} for product ${productId}`);
@@ -254,6 +265,7 @@ router.post('/send-product-rejected-email', async (req, res) => {
       status: 'rejected',
       rejectionReason: reason,
       updatedAt: serverTimestamp(),
+      rejectionEmailSent: true
     });
 
     res.json({ status: 'success', message: 'Rejection email sent to seller' });
@@ -405,10 +417,16 @@ router.post('/send-order-confirmation', async (req, res) => {
       console.warn(`Order ${orderId} not found in Firestore`);
       return res.status(404).json({ error: 'Order not found' });
     }
+    const orderData = orderSnap.data();
+    if (orderData.confirmationEmailSent) {
+      console.log(`Order confirmation email already sent to ${email} for order ${orderId}`);
+      return res.json({ status: 'success', message: 'Order confirmation email already sent' });
+    }
 
     await emailService.sendOrderConfirmation({ orderId, email, items, total, currency });
     console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
     res.json({ status: 'success', message: 'Order confirmation email sent' });
+    await updateDoc(orderRef, { confirmationEmailSent: true });
   } catch (error) {
     console.error('Error sending order confirmation email:', {
       message: error.message,
@@ -737,13 +755,26 @@ router.post('/send-seller-order-notification', async (req, res) => {
 // /send-abandoned-cart-email endpoint
 router.post('/send-abandoned-cart-email', async (req, res) => {
   try {
-    const { email, name } = req.body;
+    const { email, name, cartId } = req.body;
     if (!email || !/\S+@\S+\.\S+/.test(email)) {
       return res.status(400).json({ error: 'Valid email is required' });
     }
-    const userName = name || 'there';
-    await emailService.sendAbandonedCartEmail({ email, name: userName });
-    res.json({ status: 'success', message: 'Abandoned cart email sent' });
+    if (cartId) {
+      const cartRef = doc(db, 'carts', cartId);
+      const cartSnap = await getDoc(cartRef);
+      if (cartSnap.exists() && cartSnap.data().abandonedEmailSent) {
+        console.log(`Abandoned cart email already sent to ${email} for cart ${cartId}`);
+        return res.json({ status: 'success', message: 'Abandoned cart email already sent' });
+      }
+      await emailService.sendAbandonedCartEmail({ email, name });
+      await updateDoc(cartRef, { abandonedEmailSent: true });
+      console.log(`Abandoned cart email sent to ${email} for cart ${cartId}`);
+      return res.json({ status: 'success', message: 'Abandoned cart email sent' });
+    } else {
+      await emailService.sendAbandonedCartEmail({ email, name });
+      console.log(`Abandoned cart email sent to ${email} (no cartId to track)`);
+      return res.json({ status: 'success', message: 'Abandoned cart email sent (no cartId to track)' });
+    }
   } catch (error) {
     console.error('Error sending abandoned cart email:', { message: error.message, stack: error.stack, payload: req.body });
     res.status(500).json({ error: 'Failed to send abandoned cart email', details: error.message });
@@ -882,8 +913,27 @@ router.post('/send-order-cancelled-email', async (req, res) => {
     if (!email || !/\S+@\S+\.\S+/.test(email) || !orderNumber) {
       return res.status(400).json({ error: 'Valid email and orderNumber are required' });
     }
-    const userName = name || 'there';
-    await emailService.sendOrderCancelledEmail({ email, orderNumber, name: userName });
+    // Find order by orderNumber
+    const orderQuery = await getDocs(collection(db, 'orders'));
+    let orderDocId = null;
+    let orderData = null;
+    orderQuery.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data.orderNumber === orderNumber) {
+        orderDocId = docSnap.id;
+        orderData = data;
+      }
+    });
+    if (!orderDocId) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    if (orderData.cancelledEmailSent) {
+      console.log(`Order cancellation email already sent to ${email} for order ${orderNumber}`);
+      return res.json({ status: 'success', message: 'Order cancellation email already sent' });
+    }
+    await emailService.sendOrderCancelledEmail({ email, orderNumber, name });
+    await updateDoc(doc(db, 'orders', orderDocId), { cancelledEmailSent: true });
+    console.log(`Order cancellation email sent to ${email} for order ${orderNumber}`);
     res.json({ status: 'success', message: 'Order cancellation email sent' });
   } catch (error) {
     console.error('Error sending order cancellation email:', { message: error.message, stack: error.stack, payload: req.body });
@@ -1028,8 +1078,27 @@ router.post('/send-refund-approved-email', async (req, res) => {
     if (!email || !/\S+@\S+\.\S+/.test(email) || !orderNumber) {
       return res.status(400).json({ error: 'Valid email and orderNumber are required' });
     }
-    const userName = name || 'there';
-    await emailService.sendRefundApprovedEmail({ email, orderNumber, name: userName });
+    // Find order by orderNumber
+    const orderQuery = await getDocs(collection(db, 'orders'));
+    let orderDocId = null;
+    let orderData = null;
+    orderQuery.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data.orderNumber === orderNumber) {
+        orderDocId = docSnap.id;
+        orderData = data;
+      }
+    });
+    if (!orderDocId) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    if (orderData.refundEmailSent) {
+      console.log(`Refund approved email already sent to ${email} for order ${orderNumber}`);
+      return res.json({ status: 'success', message: 'Refund approved email already sent' });
+    }
+    await emailService.sendRefundApprovedEmail({ email, orderNumber, name });
+    await updateDoc(doc(db, 'orders', orderDocId), { refundEmailSent: true });
+    console.log(`Refund approved email sent to ${email} for order ${orderNumber}`);
     res.json({ status: 'success', message: 'Refund approved email sent' });
   } catch (error) {
     console.error('Error sending refund approved email:', { message: error.message, stack: error.stack, payload: req.body });
@@ -1101,8 +1170,27 @@ router.post('/send-shipping-confirmation-email', async (req, res) => {
     if (!email || !/\S+@\S+\.\S+/.test(email) || !orderNumber) {
       return res.status(400).json({ error: 'Valid email and orderNumber are required' });
     }
-    const userName = name || 'there';
-    await emailService.sendShippingConfirmationEmail({ email, orderNumber, name: userName });
+    // Find order by orderNumber
+    const orderQuery = await getDocs(collection(db, 'orders'));
+    let orderDocId = null;
+    let orderData = null;
+    orderQuery.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data.orderNumber === orderNumber) {
+        orderDocId = docSnap.id;
+        orderData = data;
+      }
+    });
+    if (!orderDocId) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    if (orderData.shippingEmailSent) {
+      console.log(`Shipping confirmation email already sent to ${email} for order ${orderNumber}`);
+      return res.json({ status: 'success', message: 'Shipping confirmation email already sent' });
+    }
+    await emailService.sendShippingConfirmationEmail({ email, orderNumber, name });
+    await updateDoc(doc(db, 'orders', orderDocId), { shippingEmailSent: true });
+    console.log(`Shipping confirmation email sent to ${email} for order ${orderNumber}`);
     res.json({ status: 'success', message: 'Shipping confirmation email sent' });
   } catch (error) {
     console.error('Error sending shipping confirmation email:', { message: error.message, stack: error.stack, payload: req.body });
@@ -1165,12 +1253,36 @@ router.post('/send-shipping-confirmation-email', async (req, res) => {
 // /send-feedback-request-email endpoint
 router.post('/send-feedback-request-email', async (req, res) => {
   try {
-    const { email, name } = req.body;
+    const { email, name, orderNumber } = req.body;
     if (!email || !/\S+@\S+\.\S+/.test(email)) {
       return res.status(400).json({ error: 'Valid email is required' });
     }
-    const userName = name || 'there';
-    await emailService.sendFeedbackRequestEmail({ email, name: userName });
+    // Find order by orderNumber if provided
+    let alreadySent = false;
+    if (orderNumber) {
+      const orderQuery = await getDocs(collection(db, 'orders'));
+      orderQuery.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.orderNumber === orderNumber && data.feedbackEmailSent) {
+          alreadySent = true;
+        }
+      });
+    }
+    if (alreadySent) {
+      console.log(`Feedback request email already sent to ${email} for order ${orderNumber}`);
+      return res.json({ status: 'success', message: 'Feedback request email already sent' });
+    }
+    await emailService.sendFeedbackRequestEmail({ email, name });
+    if (orderNumber) {
+      const orderQuery = await getDocs(collection(db, 'orders'));
+      orderQuery.forEach(async docSnap => {
+        const data = docSnap.data();
+        if (data.orderNumber === orderNumber) {
+          await updateDoc(doc(db, 'orders', docSnap.id), { feedbackEmailSent: true });
+        }
+      });
+    }
+    console.log(`Feedback request email sent to ${email} for order ${orderNumber}`);
     res.json({ status: 'success', message: 'Feedback request email sent' });
   } catch (error) {
     console.error('Error sending feedback request email:', { message: error.message, stack: error.stack, payload: req.body });
