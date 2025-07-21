@@ -507,4 +507,27 @@ router.post('/paystack-webhook', async (req, res) => {
   }
 });
 
+router.post('/delete-transaction', async (req, res) => {
+  try {
+    const { transactionId } = req.body;
+
+    if (!transactionId) {
+      return res.status(400).json({ error: 'Transaction ID is required', details: { transactionId } });
+    }
+
+    const transactionRef = doc(db, 'transactions', transactionId);
+    const transactionSnap = await getDoc(transactionRef);
+
+    if (!transactionSnap.exists) {
+      return res.status(404).json({ error: 'Transaction not found', details: { transactionId } });
+    }
+
+    await transactionRef.delete();
+    res.status(200).json({ message: 'Transaction deleted successfully' });
+  } catch (error) {
+    console.error('Delete transaction error:', error.message, { transactionId: req.body.transactionId });
+    res.status(500).json({ error: 'Failed to delete transaction', details: error.message });
+  }
+});
+
 module.exports = router;
