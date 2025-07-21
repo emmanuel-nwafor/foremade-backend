@@ -492,7 +492,7 @@ router.post('/approve-payout', async (req, res) => {
     if (country === 'Nigeria') {
       const recipientCode = paystackRecipientCode || sellerData.paystackRecipientCode;
       if (!recipientCode) {
-        return res.status(400).json({ error: 'Seller has not completed Paystack onboarding', details: { sellerId, paystackRecipientCode } });
+        return res.status(400).json({ error: 'Seller has not completed Paystack onboarding' });
       }
 
       const balanceResponse = await axios.get('https://api.paystack.co/balance', {

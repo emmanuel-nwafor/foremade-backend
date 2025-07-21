@@ -487,6 +487,7 @@ router.get('/payment-callback', async (req, res) => {
         status: 'completed',
         updatedAt: serverTimestamp(),
       });
+      // Use the more complete logic: fetch order details and send order confirmation email with all available info
       try {
         const orderRef = doc(db, 'orders', reference);
         const orderSnap = await getDoc(orderRef);

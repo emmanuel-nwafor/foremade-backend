@@ -122,18 +122,8 @@ router.post('/send-product-approved-email', async (req, res) => {
       return res.json({ status: 'success', message: 'Approval email already sent to seller' });
     }
 
-    try {
-      await emailService.sendProductApprovedEmail({ email, productName });
-      console.log(`Approval email sent to ${email} for product ${productId}`);
-    } catch (emailError) {
-      console.error('Nodemailer error in sendProductApprovedEmail:', {
-        message: emailError.message,
-        stack: emailError.stack,
-        email,
-        productName,
-      });
-      return res.status(500).json({ error: 'Failed to send approval email', details: emailError.message });
-    }
+    await emailService.sendProductApprovedEmail({ productId, productName, sellerId, sellerEmail });
+    console.log(`Approval email sent to ${email} for product ${productId}`);
 
     await updateDoc(productRef, {
       status: 'approved',
@@ -265,19 +255,8 @@ router.post('/send-product-rejected-email', async (req, res) => {
       return res.json({ status: 'success', message: 'Rejection email already sent to seller' });
     }
 
-    try {
-      await emailService.sendProductRejectedEmail({ email, productName, reason });
-      console.log(`Rejection email sent to ${email} for product ${productId}`);
-    } catch (emailError) {
-      console.error('Nodemailer error in sendProductRejectedEmail:', {
-        message: emailError.message,
-        stack: emailError.stack,
-        email,
-        productName,
-        reason,
-      });
-      return res.status(500).json({ error: 'Failed to send rejection email', details: emailError.message });
-    }
+    await emailService.sendProductRejectedEmail({ productId, productName, sellerId, sellerEmail, reason });
+    console.log(`Rejection email sent to ${email} for product ${productId}`);
 
     await updateDoc(productRef, {
       status: 'rejected',
