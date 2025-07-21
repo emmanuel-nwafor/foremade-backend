@@ -218,102 +218,87 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
     // --- VERIFICATION LOGIC ---
     // 1. Verify business registration number
     if (regNumber && country) {
-      if (country === 'Nigeria' || country === 'NG') {
-        try {
-          const response = await axios.post(
-            'https://api.dojah.io/api/v1/kyc/business/lookup',
-            { country: 'NG', registration_number: regNumber },
-            { headers: { 'AppId': process.env.DOJAH_APP_ID, 'Authorization': process.env.DOJAH_SECRET } }
-          );
-          if (!response.data || response.data.status !== true) {
-            return res.status(400).json({ error: 'Invalid or unverified business registration number (Nigeria)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify business registration number (Nigeria)', details: err.response?.data || err.message });
-        }
-      } else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
-        try {
-          const response = await axios.get(
-            `https://api.company-information.service.gov.uk/company/${regNumber}`,
-            { auth: { username: process.env.COMPANIES_HOUSE_API_KEY, password: '' } }
-          );
-          if (!response.data || response.data.error) {
-            return res.status(400).json({ error: 'Invalid or unverified business registration number (UK)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify business registration number (UK)', details: err.response?.data || err.message });
-        }
-      }
+      // TEMPORARY: Auto-verify all reg numbers for all countries
+      // (Remove/comment out all API calls)
+      // if (country === 'Nigeria' || country === 'NG') { ... }
+      // else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+      //   try {
+      //     const response = await axios.get(
+      //       `https://api.company-information.service.gov.uk/company/${regNumber}`,
+      //       { auth: { username: process.env.COMPANIES_HOUSE_API_KEY, password: '' } }
+      //     );
+      //     if (!response.data || response.data.error) {
+      //       return res.status(400).json({ error: 'Invalid or unverified business registration number (UK)' });
+      //     }
+      //   } catch (err) {
+      //     return res.status(400).json({ error: 'Failed to verify business registration number (UK)', details: err.response?.data || err.message });
+      //   }
+      // }
+      // Instead, always treat as verified
     }
-
     // 2. Verify tax reference number
     if (taxRef && country) {
-      if (country === 'Nigeria' || country === 'NG') {
-        try {
-          const response = await axios.post(
-            'https://api.dojah.io/api/v1/kyc/tin/lookup',
-            { country: 'NG', tin: taxRef },
-            { headers: { 'AppId': process.env.DOJAH_APP_ID, 'Authorization': process.env.DOJAH_SECRET } }
-          );
-          if (!response.data || response.data.status !== true) {
-            return res.status(400).json({ error: 'Invalid or unverified TIN (Nigeria)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify TIN (Nigeria)', details: err.response?.data || err.message });
-        }
-      } else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
-        try {
-          const vatNumber = taxRef.replace(/\s+/g, '');
-          
-          // Use VIES SOAP API for UK VAT verification
-          const vatValid = await new Promise((resolve, reject) => {
-            const url = 'http://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl';
-            
-            soap.createClient(url, (err, client) => {
-              if (err) {
-                return reject(err);
-              }
-              
-              client.checkVat({
-                countryCode: 'GB',
-                vatNumber: vatNumber
-              }, (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                
-                // VIES returns valid: true if VAT number is valid
-                resolve(result && result.valid === true);
-              });
-            });
-          });
-          
-          if (!vatValid) {
-            return res.status(400).json({ error: 'Invalid or unverified VAT number (UK)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify VAT number (UK)', details: err.message });
-        }
-      }
+      // TEMPORARY: Auto-verify all TINs/VATs for all countries
+      // (Remove/comment out all API calls)
+      // if (country === 'Nigeria' || country === 'NG') { ... }
+      // else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+      //   try {
+      //     const vatNumber = taxRef.replace(/\s+/g, '');
+      //     // Use VIES SOAP API for UK VAT verification
+      //     const vatValid = await new Promise((resolve, reject) => {
+      //       const url = 'http://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl';
+      //       soap.createClient(url, (err, client) => {
+      //         if (err) {
+      //           return reject(err);
+      //         }
+      //         client.checkVat({
+      //           countryCode: 'GB',
+      //           vatNumber: vatNumber
+      //         }, (err, result) => {
+      //           if (err) {
+      //             return reject(err);
+      //           }
+      //           resolve(result && result.valid === true);
+      //         });
+      //       });
+      //     });
+      //     if (!vatValid) {
+      //       return res.status(400).json({ error: 'Invalid or unverified VAT number (UK)' });
+      //     }
+      //   } catch (err) {
+      //     return res.status(400).json({ error: 'Failed to verify VAT number (UK)', details: err.message });
+      //   }
+      // }
+      // Instead, always treat as verified
     }
 
-    // 3. Verify bank account (Nigeria only)
-    if (accountNumber && bankCode && (country === 'Nigeria' || country === 'NG')) {
+    // 3. Verify bank account
+    if (accountNumber && country && country !== 'Nigeria' && country !== 'NG') {
+      // For non-Nigerian, use Stripe onboarding (like /onboard)
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required for onboarding non-Nigerian sellers' });
+      }
       try {
-        const response = await axios.get(
-          `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-        if (!response.data.status) {
-          return res.status(400).json({ error: 'Invalid or unverified bank account (Nigeria)', message: response.data.message });
-        }
+        const account = await stripe.accounts.create({
+          type: 'express',
+          country: country === 'United Kingdom' || country === 'UK' || country === 'GB' ? 'GB' : country,
+          email,
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+        });
+        const accountLink = await stripe.accountLinks.create({
+          account: account.id,
+          refresh_url: `${process.env.DOMAIN}/pro-seller-onboarding?status=failed`,
+          return_url: `${process.env.DOMAIN}/pro-seller-onboarding?status=success`,
+          type: 'account_onboarding',
+        });
+        // Store Stripe account ID in proSeller and seller docs after creation below
+        req.stripeAccountId = account.id;
+        req.stripeAccountLink = accountLink.url;
       } catch (err) {
-        return res.status(400).json({ error: 'Failed to verify bank account (Nigeria)', details: err.response?.data?.message || err.message });
+        return res.status(500).json({ error: 'Failed to create Stripe onboarding', details: err.message });
       }
     }
     // --- END VERIFICATION LOGIC ---
@@ -543,6 +528,13 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
+
+    // If Stripe onboarding was created, update docs and return onboarding link
+    if (req.stripeAccountId && req.stripeAccountLink) {
+      await updateDoc(doc(db, 'proSellers', proSellerId), { stripeAccountId: req.stripeAccountId });
+      await updateDoc(doc(db, 'sellers', uid), { stripeAccountId: req.stripeAccountId });
+      return res.status(201).json({ status: 'success', proSellerId, stripeAccountId: req.stripeAccountId, redirectUrl: req.stripeAccountLink });
+    }
 
     console.log(`✅ Pro seller registered: ${proSellerId}`);
     return res.status(201).json({ status: 'success', proSellerId });
