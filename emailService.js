@@ -40,7 +40,7 @@ async function sendShippingConfirmationEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Shipping Confirmation</h2>
   </div>
   <div class="content">
@@ -99,7 +99,7 @@ async function sendRefundApprovedEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Refund Approved</h2>
   </div>
   <div class="content">
@@ -158,7 +158,7 @@ async function sendOrderCancelledEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Order Cancelled</h2>
   </div>
   <div class="content">
@@ -218,7 +218,7 @@ async function sendOrderConfirmationSimpleEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Order Confirmation</h2>
   </div>
   <div class="content">
@@ -278,7 +278,7 @@ async function sendFeedbackRequestEmail({ email, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>We Value Your Feedback</h2>
   </div>
   <div class="content">
@@ -346,7 +346,7 @@ async function sendAbandonedCartEmail({ email, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>We Saved Your Cart</h2>
   </div>
   <div class="content">
@@ -399,7 +399,7 @@ async function sendListingRejectedGenericEmail({ email, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Your Item Listing Has Been Rejected</h2>
   </div>
   <div class="content">
@@ -603,7 +603,7 @@ async function sendProductRejectedEmail({ email, productName, reason }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Your Product Listing Has Been Rejected</h2>
   </div>
   <div class="content">
@@ -611,9 +611,9 @@ async function sendProductRejectedEmail({ email, productName, reason }) {
     <p>Thank you for submitting your product, <strong>${productName}</strong>, to FOREMADE.</p>
     <p>Unfortunately, your product listing has not been approved for the following reason:</p>
     <p class="reason">${reason}</p>
-    <p>We encourage you to review our <a href="https://foremade.com/seller-guidelines">seller guidelines</a> and make the necessary updates before resubmitting your product.</p>
+    <p>We encourage you to review our <a href="https://foremade.com/pro-seller-guide">seller guidelines</a> and make the necessary updates before resubmitting your product.</p>
     <p>If you believe this decision was made in error or need further clarification, please contact our support team.</p>
-    <a href="https://foremade.com/contact" class="button">Contact Support</a>
+    <a href="https://foremade.com/support" class="button">Contact Support</a>
     <p>Best regards,<br><strong>The FOREMADE Team</strong></p>
   </div>
   <div class="footer">
@@ -662,14 +662,14 @@ async function sendProductApprovedEmail({ email, productName }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Your Product Listing Has Been Approved</h2>
   </div>
   <div class="content">
     <p><strong>Hello,</strong></p>
     <p>Congratulations! Your product, <span class="product-name">${productName}</span>, has been approved and is now live on FOREMADE.</p>
     <p>Your listing is ready for customers to discover and purchase. You can view or manage your listing in your seller dashboard.</p>
-    <a href="https://foremade.com/seller-dashboard" class="button">View Your Listing</a>
+    <a href="https://foremade.com/dashboard" class="button">View Your Listing</a>
     <p>Thank you for being a part of the FOREMADE marketplace. If you have any questions, our support team is here to help.</p>
     <p>Best regards,<br><strong>The FOREMADE Team</strong></p>
   </div>
