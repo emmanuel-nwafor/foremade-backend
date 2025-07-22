@@ -11,6 +11,108 @@ const { WebApi } = require('smile-identity-core');
 
 /**
  * @swagger
+ * /api/seller/products:
+ *   get:
+ *     summary: Fetch seller's products
+ *     description: Retrieve all products for the authenticated seller from Firestore
+ *     tags: [Seller]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Products retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 products:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       name:
+ *                         type: string
+ *                       price:
+ *                         type: number
+ *                       imageUrls:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                       bumpExpiry:
+ *                         type: string
+ *                         description: Timestamp when bump expires
+ *       400:
+ *         description: User not a seller
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized - Firebase token required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/api/seller/products', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const { uid } = req.user;
+
+    // Check if user is a seller
+    const sellerQuery = query(collection(db, 'sellers'), where('userId', '==', uid));
+    const sellerSnap = await getDocs(sellerQuery);
+    if (sellerSnap.empty) {
+      return res.status(400).json({ error: 'User is not registered as a seller' });
+    }
+
+    // Fetch products for the seller
+    const productsQuery = query(
+      collection(db, 'products'),
+      where('sellerId', '==', uid),
+      orderBy('createdAt', 'desc')
+    );
+    const productsSnap = await getDocs(productsQuery);
+
+    const products = productsSnap.docs.map(doc => {
+      const data = doc.data();
+      const imageUrls = Array.isArray(data.imageUrls)
+        ? data.imageUrls.filter(url => typeof url === 'string' && url.startsWith('https://res.cloudinary.com/'))
+        : data.imageUrl && typeof data.imageUrl === 'string' && data.imageUrl.startsWith('https://res.cloudinary.com/')
+        ? [data.imageUrl]
+        : ['https://res.cloudinary.com/your_cloud_name/image/upload/v1/default.jpg'];
+      return {
+        id: doc.id,
+        name: data.name || 'Unnamed Product',
+        price: data.price || 0,
+        imageUrls: imageUrls.length > 0 ? imageUrls : ['https://res.cloudinary.com/your_cloud_name/image/upload/v1/default.jpg'],
+        bumpExpiry: data.bumpExpiry || null,
+        uploadDate: data.uploadDate?.toDate() || new Date()
+      };
+    });
+
+    res.status(200).json({ status: 'success', products });
+  } catch (error) {
+    console.error('Fetch products error:', error);
+    res.status(500).json({ error: 'Failed to fetch products', details: error.message });
+  }
+});
+
+// [Rest of the existing routes remain unchanged...]
+
+/**
+ * @swagger
  * /api/pro-seller:
  *   post:
  *     summary: Register as pro seller with verification
@@ -545,6 +647,7 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
   }
 });
 
+// [Rest of the existing routes remain unchanged...]
 
 /**
  * @swagger
@@ -1915,4 +2018,4 @@ router.get('/api/admin/all-pro-sellers', authenticateFirebaseToken, async (req, 
   }
 });
 
-module.exports = router; 
+module.exports = router;
