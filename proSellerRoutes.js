@@ -11,108 +11,6 @@ const { WebApi } = require('smile-identity-core');
 
 /**
  * @swagger
- * /api/seller/products:
- *   get:
- *     summary: Fetch seller's products
- *     description: Retrieve all products for the authenticated seller from Firestore
- *     tags: [Seller]
- *     security:
- *       - BearerAuth: []
- *     responses:
- *       200:
- *         description: Products retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:
- *                         type: string
- *                       name:
- *                         type: string
- *                       price:
- *                         type: number
- *                       imageUrls:
- *                         type: array
- *                         items:
- *                           type: string
- *                       bumpExpiry:
- *                         type: string
- *                         description: Timestamp when bump expires
- *       400:
- *         description: User not a seller
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Unauthorized - Firebase token required
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.get('/api/seller/products', authenticateFirebaseToken, async (req, res) => {
-  try {
-    const { uid } = req.user;
-
-    // Check if user is a seller
-    const sellerQuery = query(collection(db, 'sellers'), where('userId', '==', uid));
-    const sellerSnap = await getDocs(sellerQuery);
-    if (sellerSnap.empty) {
-      return res.status(400).json({ error: 'User is not registered as a seller' });
-    }
-
-    // Fetch products for the seller
-    const productsQuery = query(
-      collection(db, 'products'),
-      where('sellerId', '==', uid),
-      orderBy('createdAt', 'desc')
-    );
-    const productsSnap = await getDocs(productsQuery);
-
-    const products = productsSnap.docs.map(doc => {
-      const data = doc.data();
-      const imageUrls = Array.isArray(data.imageUrls)
-        ? data.imageUrls.filter(url => typeof url === 'string' && url.startsWith('https://res.cloudinary.com/'))
-        : data.imageUrl && typeof data.imageUrl === 'string' && data.imageUrl.startsWith('https://res.cloudinary.com/')
-        ? [data.imageUrl]
-        : ['https://res.cloudinary.com/your_cloud_name/image/upload/v1/default.jpg'];
-      return {
-        id: doc.id,
-        name: data.name || 'Unnamed Product',
-        price: data.price || 0,
-        imageUrls: imageUrls.length > 0 ? imageUrls : ['https://res.cloudinary.com/your_cloud_name/image/upload/v1/default.jpg'],
-        bumpExpiry: data.bumpExpiry || null,
-        uploadDate: data.uploadDate?.toDate() || new Date()
-      };
-    });
-
-    res.status(200).json({ status: 'success', products });
-  } catch (error) {
-    console.error('Fetch products error:', error);
-    res.status(500).json({ error: 'Failed to fetch products', details: error.message });
-  }
-});
-
-// [Rest of the existing routes remain unchanged...]
-
-/**
- * @swagger
  * /api/pro-seller:
  *   post:
  *     summary: Register as pro seller with verification
@@ -1394,6 +1292,76 @@ router.post('/api/bump-product', authenticateFirebaseToken, async (req, res) => 
   } catch (error) {
     console.error('Product bump error:', error);
     res.status(500).json({ error: 'Failed to bump product', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /api/pro-seller/bump-quota:
+ *   get:
+ *     summary: Get pro seller bump quota
+ *     description: Retrieve the remaining bump quota for the authenticated pro seller
+ *     tags: [Pro-Seller]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Quota retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 quota:
+ *                   type: integer
+ *                   description: Remaining bump quota
+ *                   example: 5
+ *       400:
+ *         description: User not pro seller
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized - Firebase token required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/api/pro-seller/bump-quota', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const { uid } = req.user;
+
+    // Check if user is pro seller
+    const proSellerQuery = query(collection(db, 'proSellers'), where('userId', '==', uid));
+    const proSellerSnap = await getDocs(proSellerQuery);
+    
+    if (proSellerSnap.empty) {
+      return res.status(400).json({ error: 'User is not registered as a pro seller' });
+    }
+
+    const proSellerData = proSellerSnap.docs[0].data();
+    if (!proSellerData.isActive || proSellerData.status !== 'approved') {
+      return res.status(400).json({ error: 'Pro seller account is not active or approved' });
+    }
+
+    // For now, return a fixed quota (e.g., 5). You can replace this with dynamic logic (e.g., from Firestore or a config).
+    const quota = 5; // Replace with actual quota tracking if needed
+
+    res.status(200).json({ status: 'success', quota });
+  } catch (error) {
+    console.error('Fetch bump quota error:', error);
+    res.status(500).json({ error: 'Failed to fetch bump quota', details: error.message });
   }
 });
 
