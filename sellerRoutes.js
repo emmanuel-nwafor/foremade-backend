@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection, increment } = require('firebase/firestore');
+const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection, increment, deleteDoc } = require('firebase/firestore');
 const router = express.Router();
 
 router.post('/onboard-seller', async (req, res) => {
@@ -510,7 +510,7 @@ router.post('/paystack-webhook', async (req, res) => {
 router.post('/delete-transaction', async (req, res) => {
   try {
     const { transactionId } = req.body;
-    console.log('Delete transaction request:', { transactionId }); // Debug log
+    console.log('Delete transaction request:', { transactionId });
 
     if (!transactionId) {
       return res.status(400).json({ error: 'Transaction ID is required', details: { transactionId } });
@@ -518,14 +518,14 @@ router.post('/delete-transaction', async (req, res) => {
 
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
-    console.log('Transaction exists:', transactionSnap.exists); // Debug log
+    console.log('Transaction exists:', transactionSnap.exists);
 
     if (!transactionSnap.exists) {
       return res.status(404).json({ error: 'Transaction not found', details: { transactionId } });
     }
 
-    await transactionRef.delete();
-    console.log('Transaction deleted:', transactionId); // Debug log
+    await deleteDoc(transactionRef); // Updated to deleteDoc
+    console.log('Transaction deleted:', transactionId);
     res.status(200).json({ message: 'Transaction deleted successfully' });
   } catch (error) {
     console.error('Delete transaction error:', error.message, { transactionId: req.body.transactionId, stack: error.stack });
