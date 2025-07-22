@@ -3,6 +3,7 @@ const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const crypto = require('crypto');
+const { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs } = require('firebase/firestore');
 const router = express.Router();
 const emailService = require('./emailService');
 
@@ -486,6 +487,7 @@ router.get('/payment-callback', async (req, res) => {
         status: 'completed',
         updatedAt: serverTimestamp(),
       });
+      // Use the more complete logic: fetch order details and send order confirmation email with all available info
       try {
         const orderRef = doc(db, 'orders', reference);
         const orderSnap = await getDoc(orderRef);

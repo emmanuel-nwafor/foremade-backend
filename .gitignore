@@ -40,6 +40,8 @@ yarn-error.log
 .pnp/
 .yarn/
 .md
+<<<<<<< HEAD
+=======
 
 # Node.js
 node_modules/
@@ -72,3 +74,4 @@ NTUSER.*
 .idea/
 *.iml
 .DS_Store
+>>>>>>> f13c7825bf8949ea47db852d6b50efdee0a2c65a

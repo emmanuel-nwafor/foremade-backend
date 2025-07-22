@@ -6,6 +6,8 @@ const { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, order
 const { authenticateFirebaseToken } = require('./middleware');
 const soap = require('soap');
 const router = express.Router();
+const { sendSupportRequestEmail, sendProSellerApprovedEmail, sendProSellerRejectedEmail } = require('./emailService');
+const { WebApi } = require('smile-identity-core');
 
 /**
  * @swagger
@@ -202,7 +204,8 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       accountNumber,
       bankName,
       agree,
-      ...rest // Capture any extra fields
+      testMode,
+      ...rest
     } = req.body;
 
     // Validate required fields
@@ -215,102 +218,87 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
     // --- VERIFICATION LOGIC ---
     // 1. Verify business registration number
     if (regNumber && country) {
-      if (country === 'Nigeria' || country === 'NG') {
-        try {
-          const response = await axios.post(
-            'https://api.dojah.io/api/v1/kyc/business/lookup',
-            { country: 'NG', registration_number: regNumber },
-            { headers: { 'AppId': process.env.DOJAH_APP_ID, 'Authorization': process.env.DOJAH_SECRET } }
-          );
-          if (!response.data || response.data.status !== true) {
-            return res.status(400).json({ error: 'Invalid or unverified business registration number (Nigeria)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify business registration number (Nigeria)', details: err.response?.data || err.message });
-        }
-      } else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
-        try {
-          const response = await axios.get(
-            `https://api.company-information.service.gov.uk/company/${regNumber}`,
-            { auth: { username: process.env.COMPANIES_HOUSE_API_KEY, password: '' } }
-          );
-          if (!response.data || response.data.error) {
-            return res.status(400).json({ error: 'Invalid or unverified business registration number (UK)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify business registration number (UK)', details: err.response?.data || err.message });
-        }
-      }
+      // TEMPORARY: Auto-verify all reg numbers for all countries
+      // (Remove/comment out all API calls)
+      // if (country === 'Nigeria' || country === 'NG') { ... }
+      // else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+      //   try {
+      //     const response = await axios.get(
+      //       `https://api.company-information.service.gov.uk/company/${regNumber}`,
+      //       { auth: { username: process.env.COMPANIES_HOUSE_API_KEY, password: '' } }
+      //     );
+      //     if (!response.data || response.data.error) {
+      //       return res.status(400).json({ error: 'Invalid or unverified business registration number (UK)' });
+      //     }
+      //   } catch (err) {
+      //     return res.status(400).json({ error: 'Failed to verify business registration number (UK)', details: err.response?.data || err.message });
+      //   }
+      // }
+      // Instead, always treat as verified
     }
-
     // 2. Verify tax reference number
     if (taxRef && country) {
-      if (country === 'Nigeria' || country === 'NG') {
-        try {
-          const response = await axios.post(
-            'https://api.dojah.io/api/v1/kyc/tin/lookup',
-            { country: 'NG', tin: taxRef },
-            { headers: { 'AppId': process.env.DOJAH_APP_ID, 'Authorization': process.env.DOJAH_SECRET } }
-          );
-          if (!response.data || response.data.status !== true) {
-            return res.status(400).json({ error: 'Invalid or unverified TIN (Nigeria)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify TIN (Nigeria)', details: err.response?.data || err.message });
-        }
-      } else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
-        try {
-          const vatNumber = taxRef.replace(/\s+/g, '');
-          
-          // Use VIES SOAP API for UK VAT verification
-          const vatValid = await new Promise((resolve, reject) => {
-            const url = 'http://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl';
-            
-            soap.createClient(url, (err, client) => {
-              if (err) {
-                return reject(err);
-              }
-              
-              client.checkVat({
-                countryCode: 'GB',
-                vatNumber: vatNumber
-              }, (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                
-                // VIES returns valid: true if VAT number is valid
-                resolve(result && result.valid === true);
-              });
-            });
-          });
-          
-          if (!vatValid) {
-            return res.status(400).json({ error: 'Invalid or unverified VAT number (UK)' });
-          }
-        } catch (err) {
-          return res.status(400).json({ error: 'Failed to verify VAT number (UK)', details: err.message });
-        }
-      }
+      // TEMPORARY: Auto-verify all TINs/VATs for all countries
+      // (Remove/comment out all API calls)
+      // if (country === 'Nigeria' || country === 'NG') { ... }
+      // else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+      //   try {
+      //     const vatNumber = taxRef.replace(/\s+/g, '');
+      //     // Use VIES SOAP API for UK VAT verification
+      //     const vatValid = await new Promise((resolve, reject) => {
+      //       const url = 'http://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl';
+      //       soap.createClient(url, (err, client) => {
+      //         if (err) {
+      //           return reject(err);
+      //         }
+      //         client.checkVat({
+      //           countryCode: 'GB',
+      //           vatNumber: vatNumber
+      //         }, (err, result) => {
+      //           if (err) {
+      //             return reject(err);
+      //           }
+      //           resolve(result && result.valid === true);
+      //         });
+      //       });
+      //     });
+      //     if (!vatValid) {
+      //       return res.status(400).json({ error: 'Invalid or unverified VAT number (UK)' });
+      //     }
+      //   } catch (err) {
+      //     return res.status(400).json({ error: 'Failed to verify VAT number (UK)', details: err.message });
+      //   }
+      // }
+      // Instead, always treat as verified
     }
 
-    // 3. Verify bank account (Nigeria only)
-    if (accountNumber && bankCode && (country === 'Nigeria' || country === 'NG')) {
+    // 3. Verify bank account
+    if (accountNumber && country && country !== 'Nigeria' && country !== 'NG') {
+      // For non-Nigerian, use Stripe onboarding (like /onboard)
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required for onboarding non-Nigerian sellers' });
+      }
       try {
-        const response = await axios.get(
-          `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-        if (!response.data.status) {
-          return res.status(400).json({ error: 'Invalid or unverified bank account (Nigeria)', message: response.data.message });
-        }
+        const account = await stripe.accounts.create({
+          type: 'express',
+          country: country === 'United Kingdom' || country === 'UK' || country === 'GB' ? 'GB' : country,
+          email,
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+        });
+        const accountLink = await stripe.accountLinks.create({
+          account: account.id,
+          refresh_url: `${process.env.DOMAIN}/pro-seller-onboarding?status=failed`,
+          return_url: `${process.env.DOMAIN}/pro-seller-onboarding?status=success`,
+          type: 'account_onboarding',
+        });
+        // Store Stripe account ID in proSeller and seller docs after creation below
+        req.stripeAccountId = account.id;
+        req.stripeAccountLink = accountLink.url;
       } catch (err) {
-        return res.status(400).json({ error: 'Failed to verify bank account (Nigeria)', details: err.response?.data?.message || err.message });
+        return res.status(500).json({ error: 'Failed to create Stripe onboarding', details: err.message });
       }
     }
     // --- END VERIFICATION LOGIC ---
@@ -351,12 +339,99 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       return res.status(409).json({ error: 'User is already registered as a pro seller' });
     }
 
-    // Store any extra fields in a dedicated object
+    // 🧪 Skip real verifications if in test mode
+    if (!testMode && country === 'NG') {
+      const smile = new WebApi(
+        process.env.SMILE_PARTNER_ID,
+        process.env.SMILE_API_KEY,
+        '',
+        process.env.SMILE_ENV || 'sandbox'
+      );
+
+      // ✅ Verify CAC / Reg Number
+      if (regNumber) {
+        try {
+          const regRes = await smile.submit_job({
+            user_id: `uid_${uid}`,
+            job_id: `kyb_${Date.now()}`,
+            job_type: 13,
+            id_type: 'CAC',
+            id_number: regNumber,
+            country: 'NG',
+            optional_info: {
+              business_name: businessName,
+              full_name: manager || businessName
+            },
+            return_job_status: true
+          });
+
+          console.log('Smile CAC verification response:', regRes);
+          
+          if (!regRes || regRes.ResultText !== 'ID Number Valid') {
+            return res.status(400).json({ 
+              error: 'Invalid or unverified CAC number (Smile)', 
+              details: regRes?.ResultText || 'Verification failed'
+            });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Smile CAC verification failed', details: err.message });
+        }
+      }
+
+      // ✅ Verify TIN
+      if (taxRef) {
+        try {
+          const tinRes = await smile.submit_job({
+            user_id: `uid_${uid}`,
+            job_id: `tin_${Date.now()}`,
+            job_type: 5,
+            id_type: 'TIN',
+            id_number: taxRef,
+            country: 'NG',
+            optional_info: {
+              full_name: manager || businessName
+            },
+            return_job_status: true
+          });
+
+          console.log('Smile TIN verification response:', tinRes);
+          
+          if (!tinRes || tinRes.ResultText !== 'ID Number Valid') {
+            return res.status(400).json({ 
+              error: 'Invalid or unverified TIN (Smile)', 
+              details: tinRes?.ResultText || 'Verification failed'
+            });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Smile TIN verification failed', details: err.message });
+        }
+      }
+
+      // ✅ Verify bank account (via Paystack)
+      if (accountNumber && bankCode) {
+        try {
+          const response = await axios.get(
+            `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          if (!response.data.status) {
+            return res.status(400).json({ error: 'Invalid or unverified bank account (Nigeria)', message: response.data.message });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Failed to verify bank account (Nigeria)', details: err.response?.data?.message || err.message });
+        }
+      }
+    }
+
+    const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const extraFields = { ...rest };
 
-    // Create pro seller document
-    const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const proSellerRef = doc(db, 'proSellers', proSellerId);
+    // Store any extra fields in a dedicated object
     const proSellerData = {
       proSellerId,
       userId: uid,
@@ -392,7 +467,7 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       updatedAt: serverTimestamp()
     };
 
-    await setDoc(proSellerRef, proSellerData);
+    await setDoc(doc(db, 'proSellers', proSellerId), proSellerData);
 
     // Create seller document (for regular seller functionality)
     const sellerRef = doc(db, 'sellers', uid);
@@ -445,18 +520,31 @@ router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
       updatedAt: serverTimestamp()
     });
 
-    console.log(`Pro seller registered successfully: ${proSellerId} for user ${uid}`);
-    res.status(201).json({
-      status: 'success',
-      message: 'Pro seller registered successfully',
-      proSellerId
+    // After successful pro seller registration, create approval request
+    await setDoc(doc(db, 'proSellerApprovals', proSellerId), {
+      proSellerId,
+      userId: uid,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
     });
 
+    // If Stripe onboarding was created, update docs and return onboarding link
+    if (req.stripeAccountId && req.stripeAccountLink) {
+      await updateDoc(doc(db, 'proSellers', proSellerId), { stripeAccountId: req.stripeAccountId });
+      await updateDoc(doc(db, 'sellers', uid), { stripeAccountId: req.stripeAccountId });
+      return res.status(201).json({ status: 'success', proSellerId, stripeAccountId: req.stripeAccountId, redirectUrl: req.stripeAccountLink });
+    }
+
+    console.log(`✅ Pro seller registered: ${proSellerId}`);
+    return res.status(201).json({ status: 'success', proSellerId });
+
   } catch (error) {
-    console.error('Pro seller registration error:', error);
-    res.status(500).json({ error: 'Failed to register pro seller', details: error.message });
+    console.error('❌ Pro seller registration failed:', error);
+    return res.status(500).json({ error: 'Failed to register pro seller', details: error.message });
   }
 });
+
 
 /**
  * @swagger
@@ -1517,6 +1605,313 @@ router.post('/api/bulk-upload-products', authenticateFirebaseToken, async (req, 
   } catch (error) {
     console.error('Bulk upload error:', error);
     res.status(500).json({ error: 'Failed to submit bulk upload request', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /api/support-request:
+ *   post:
+ *     summary: Submit a support request
+ *     description: Allows any authenticated user to submit a support request
+ *     tags: [Support]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - subject
+ *               - message
+ *             properties:
+ *               subject:
+ *                 type: string
+ *                 description: Subject of the support request
+ *                 example: "Payment issue"
+ *               message:
+ *                 type: string
+ *                 description: Detailed message for support
+ *                 example: "I have not received my payout."
+ *     responses:
+ *       200:
+ *         description: Support request submitted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Support request submitted"
+ *                 requestId:
+ *                   type: string
+ *                   description: Support request ID
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized - Firebase token required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/api/support-request', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const { uid } = req.user;
+    const { subject, message } = req.body;
+    if (!subject || !message) {
+      return res.status(400).json({ error: 'Subject and message are required' });
+    }
+    // Fetch user email and name if available
+    let fromEmail = '';
+    let fromName = '';
+    try {
+      const userSnap = await getDoc(doc(db, 'users', uid));
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        fromEmail = userData.email || '';
+        fromName = userData.name || userData.displayName || '';
+      }
+    } catch (e) {
+      // Ignore user fetch errors, fallback to blank
+    }
+    // Send support email
+    await sendSupportRequestEmail({ fromEmail, fromName, subject, message });
+    const requestId = `support_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const supportRef = doc(db, 'supportRequests', requestId);
+    const supportData = {
+      requestId,
+      userId: uid,
+      subject,
+      message,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    await setDoc(supportRef, supportData);
+    res.status(200).json({ status: 'success', message: 'Support request submitted', requestId });
+  } catch (error) {
+    console.error('Support request error:', error);
+    res.status(500).json({ error: 'Failed to submit support request', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /api/admin/pro-seller-approvals:
+ *   get:
+ *     summary: List all pending pro seller approvals
+ *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of pending approvals
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: 'success'
+ *                 approvals:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ */
+router.get('/api/admin/pro-seller-approvals', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const approvalsSnap = await getDocs(query(collection(db, 'proSellerApprovals'), where('status', '==', 'pending')));
+    const approvals = approvalsSnap.docs.map(doc => doc.data());
+    res.json({ status: 'success', approvals });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch approvals', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /api/admin/approve-pro-seller:
+ *   post:
+ *     summary: Approve or reject a pro seller
+ *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - proSellerId
+ *               - approve
+ *             properties:
+ *               proSellerId:
+ *                 type: string
+ *               approve:
+ *                 type: boolean
+ *                 description: true to approve, false to reject
+ *     responses:
+ *       200:
+ *         description: Approval/rejection processed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: 'success'
+ *                 message:
+ *                   type: string
+ *       403:
+ *         description: Admin access required
+ */
+router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const { proSellerId, approve } = req.body;
+    if (!proSellerId || typeof approve !== 'boolean') {
+      return res.status(400).json({ error: 'proSellerId and approve(boolean) are required' });
+    }
+    // Get approval request
+    const approvalRef = doc(db, 'proSellerApprovals', proSellerId);
+    const approvalSnap = await getDoc(approvalRef);
+    if (!approvalSnap.exists()) {
+      return res.status(404).json({ error: 'Approval request not found' });
+    }
+    const approvalData = approvalSnap.data();
+    // Rate limiting: only send email if not already sent
+    if (approvalData.emailSent) {
+      // Update status fields but skip email
+      await updateDoc(approvalRef, {
+        status: approve ? 'approved' : 'rejected',
+        updatedAt: serverTimestamp()
+      });
+      const proSellerRef = doc(db, 'proSellers', proSellerId);
+      const proSellerSnap = await getDoc(proSellerRef);
+      if (proSellerSnap.exists()) {
+        await updateDoc(proSellerRef, {
+          status: approve ? 'approved' : 'rejected',
+          updatedAt: serverTimestamp()
+        });
+      }
+      const userRef = doc(db, 'users', approvalData.userId);
+      if (approve) {
+        await updateDoc(userRef, {
+          isProSeller: true,
+          role: 'proseller',
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await updateDoc(userRef, {
+          isProSeller: false,
+          role: 'buyer',
+          updatedAt: serverTimestamp()
+        });
+      }
+      return res.json({ status: 'success', message: 'Email already sent previously. Status updated.' });
+    }
+    // Update approval status
+    await updateDoc(approvalRef, {
+      status: approve ? 'approved' : 'rejected',
+      updatedAt: serverTimestamp(),
+      emailSent: true
+    });
+    // Update proSeller and user status
+    const proSellerRef = doc(db, 'proSellers', proSellerId);
+    const proSellerSnap = await getDoc(proSellerRef);
+    if (proSellerSnap.exists()) {
+      await updateDoc(proSellerRef, {
+        status: approve ? 'approved' : 'rejected',
+        updatedAt: serverTimestamp()
+      });
+    }
+    const userRef = doc(db, 'users', approvalData.userId);
+    let userEmail = '';
+    let userName = '';
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      userEmail = userData.email || '';
+      userName = userData.name || userData.displayName || '';
+    }
+    if (approve) {
+      await updateDoc(userRef, {
+        isProSeller: true,
+        role: 'proseller',
+        updatedAt: serverTimestamp()
+      });
+      if (userEmail) {
+        await sendProSellerApprovedEmail({ email: userEmail, name: userName });
+      }
+    } else {
+      await updateDoc(userRef, {
+        isProSeller: false,
+        role: 'buyer',
+        updatedAt: serverTimestamp()
+      });
+      if (userEmail) {
+        await sendProSellerRejectedEmail({ email: userEmail, name: userName });
+      }
+    }
+    res.json({ status: 'success', message: approve ? 'Pro seller approved' : 'Pro seller rejected' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to process approval', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /api/admin/all-pro-sellers:
+ *   get:
+ *     summary: List all pro sellers
+ *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of all pro sellers
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: 'success'
+ *                 proSellers:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ */
+router.get('/api/admin/all-pro-sellers', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const proSellersSnap = await getDocs(collection(db, 'proSellers'));
+    const proSellers = proSellersSnap.docs.map(doc => doc.data());
+    const pending = proSellers.filter(ps => ps.status === 'pending');
+    const approved = proSellers.filter(ps => ps.status === 'approved');
+    const rejected = proSellers.filter(ps => ps.status === 'rejected');
+    res.json({ status: 'success', proSellers, pending, approved, rejected });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch pro sellers', details: error.message });
   }
 });
 

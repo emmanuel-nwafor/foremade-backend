@@ -1,9 +1,17 @@
 const express = require('express');
 const nodemailer = require('nodemailer');
 const { db } = require('./firebaseConfig');
-const { doc, getDoc, updateDoc, serverTimestamp } = require('firebase/firestore');
+const { doc, getDoc, updateDoc, serverTimestamp, collection, getDocs } = require('firebase/firestore');
 const router = express.Router();
 const emailService = require('./emailService');
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 /**
  * @swagger
@@ -51,7 +59,6 @@ const emailService = require('./emailService');
  *                 status:
  *                   type: string
  *                   example: "success"
- क्यों
  *                 message:
  *                   type: string
  *                   example: "Approval email sent to seller"
@@ -109,19 +116,14 @@ router.post('/send-product-approved-email', async (req, res) => {
       console.warn(`Product ${productId} not found in Firestore`);
       return res.status(404).json({ error: 'Product not found' });
     }
-
-    try {
-      await emailService.sendProductApprovedEmail({ email, productName });
-      console.log(`Approval email sent to ${email} for product ${productId}`);
-    } catch (emailError) {
-      console.error('Nodemailer error in sendProductApprovedEmail:', {
-        message: emailError.message,
-        stack: emailError.stack,
-        email,
-        productName,
-      });
-      return res.status(500).json({ error: 'Failed to send approval email', details: emailError.message });
+    const productData = productSnap.data();
+    if (productData.approvalEmailSent) {
+      console.log(`Approval email already sent to ${email} for product ${productId}`);
+      return res.json({ status: 'success', message: 'Approval email already sent to seller' });
     }
+
+    await emailService.sendProductApprovedEmail({ productId, productName, sellerId, sellerEmail });
+    console.log(`Approval email sent to ${email} for product ${productId}`);
 
     await updateDoc(productRef, {
       status: 'approved',
@@ -247,20 +249,14 @@ router.post('/send-product-rejected-email', async (req, res) => {
       console.warn(`Product ${productId} not found in Firestore`);
       return res.status(404).json({ error: 'Product not found' });
     }
-
-    try {
-      await emailService.sendProductRejectedEmail({ email, productName, reason });
-      console.log(`Rejection email sent to ${email} for product ${productId}`);
-    } catch (emailError) {
-      console.error('Nodemailer error in sendProductRejectedEmail:', {
-        message: emailError.message,
-        stack: emailError.stack,
-        email,
-        productName,
-        reason,
-      });
-      return res.status(500).json({ error: 'Failed to send rejection email', details: emailError.message });
+    const productData = productSnap.data();
+    if (productData.rejectionEmailSent) {
+      console.log(`Rejection email already sent to ${email} for product ${productId}`);
+      return res.json({ status: 'success', message: 'Rejection email already sent to seller' });
     }
+
+    await emailService.sendProductRejectedEmail({ productId, productName, sellerId, sellerEmail, reason });
+    console.log(`Rejection email sent to ${email} for product ${productId}`);
 
     await updateDoc(productRef, {
       status: 'rejected',
@@ -370,7 +366,6 @@ router.post('/send-product-rejected-email', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-order-confirmation endpoint
 router.post('/send-order-confirmation', async (req, res) => {
   try {
     const { orderId, email, items, total, currency } = req.body;
@@ -416,6 +411,11 @@ router.post('/send-order-confirmation', async (req, res) => {
     if (!orderSnap.exists()) {
       console.warn(`Order ${orderId} not found in Firestore`);
       return res.status(404).json({ error: 'Order not found' });
+    }
+    const orderData = orderSnap.data();
+    if (orderData.confirmationEmailSent) {
+      console.log(`Order confirmation email already sent to ${email} for order ${orderId}`);
+      return res.json({ status: 'success', message: 'Order confirmation email already sent' });
     }
 
     await emailService.sendOrderConfirmation({ orderId, email, items, total, currency });
@@ -474,7 +474,6 @@ router.post('/send-order-confirmation', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// Route for Youth Empowerment Form
 router.post('/api/youth-empowerment', async (req, res) => {
   const formData = req.body;
   try {
@@ -615,7 +614,6 @@ router.post('/api/youth-empowerment', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-seller-order-notification endpoint
 router.post('/send-seller-order-notification', async (req, res) => {
   try {
     const { orderId, sellerId, items, total, currency, shippingDetails } = req.body;
@@ -746,7 +744,6 @@ router.post('/send-seller-order-notification', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-abandoned-cart-email endpoint
 router.post('/send-abandoned-cart-email', async (req, res) => {
   try {
     const { email, name } = req.body;
@@ -814,7 +811,6 @@ router.post('/send-abandoned-cart-email', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-listing-rejected-generic endpoint
 router.post('/send-listing-rejected-generic', async (req, res) => {
   try {
     const { email, name } = req.body;
@@ -887,7 +883,6 @@ router.post('/send-listing-rejected-generic', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-order-cancelled-email endpoint
 router.post('/send-order-cancelled-email', async (req, res) => {
   try {
     const { email, orderNumber, name } = req.body;
@@ -960,7 +955,6 @@ router.post('/send-order-cancelled-email', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-order-confirmation-simple endpoint
 router.post('/send-order-confirmation-simple', async (req, res) => {
   try {
     const { email, orderNumber, name } = req.body;
@@ -1033,7 +1027,6 @@ router.post('/send-order-confirmation-simple', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-refund-approved-email endpoint
 router.post('/send-refund-approved-email', async (req, res) => {
   try {
     const { email, orderNumber, name } = req.body;
@@ -1106,7 +1099,6 @@ router.post('/send-refund-approved-email', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-shipping-confirmation-email endpoint
 router.post('/send-shipping-confirmation-email', async (req, res) => {
   try {
     const { email, orderNumber, name } = req.body;
@@ -1174,7 +1166,6 @@ router.post('/send-shipping-confirmation-email', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// /send-feedback-request-email endpoint
 router.post('/send-feedback-request-email', async (req, res) => {
   try {
     const { email, name } = req.body;

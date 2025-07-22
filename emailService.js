@@ -40,7 +40,7 @@ async function sendShippingConfirmationEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Shipping Confirmation</h2>
   </div>
   <div class="content">
@@ -99,7 +99,7 @@ async function sendRefundApprovedEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Refund Approved</h2>
   </div>
   <div class="content">
@@ -158,7 +158,7 @@ async function sendOrderCancelledEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Order Cancelled</h2>
   </div>
   <div class="content">
@@ -218,7 +218,7 @@ async function sendOrderConfirmationSimpleEmail({ email, orderNumber, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Order Confirmation</h2>
   </div>
   <div class="content">
@@ -278,7 +278,7 @@ async function sendFeedbackRequestEmail({ email, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>We Value Your Feedback</h2>
   </div>
   <div class="content">
@@ -346,7 +346,7 @@ async function sendAbandonedCartEmail({ email, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>We Saved Your Cart</h2>
   </div>
   <div class="content">
@@ -399,7 +399,7 @@ async function sendListingRejectedGenericEmail({ email, name }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Your Item Listing Has Been Rejected</h2>
   </div>
   <div class="content">
@@ -427,6 +427,147 @@ async function sendListingRejectedGenericEmail({ email, name }) {
   </div>
 </body>
 </html>`,
+  };
+  await transporter.sendMail(mailOptions);
+}
+
+// Support Request Email
+async function sendSupportRequestEmail({ fromEmail, fromName, subject, message }) {
+  if (!subject || !message) {
+    throw new Error('Subject and message are required');
+  }
+  const sender = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
+  const mailOptions = {
+    from: `FOREMADE Support Request <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+    to: 'support@foremade.com',
+    subject: `[Support Request] ${subject}`,
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Support Request - FOREMADE</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #fff; color: #0F2940; }
+    .container { max-width: 600px; margin: 0 auto; padding: 30px; background: #f9f9f9; border-radius: 8px; }
+    .header { background-color: #0F2940; color: #fff; padding: 20px; border-radius: 8px 8px 0 0; }
+    .content { padding: 20px; }
+    .footer { font-size: 13px; color: #666; margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>New Support Request</h2>
+    </div>
+    <div class="content">
+      <p><strong>From:</strong> ${fromName ? fromName : 'User'} (${fromEmail || 'N/A'})</p>
+      <p><strong>Subject:</strong> ${subject}</p>
+      <p><strong>Message:</strong></p>
+      <p>${message.replace(/\n/g, '<br>')}</p>
+    </div>
+    <div class="footer">
+      <p>This message was sent from the FOREMADE support request form.</p>
+    </div>
+  </div>
+</body>
+</html>`
+  };
+  await transporter.sendMail(mailOptions);
+}
+
+// Pro Seller Approved Email
+async function sendProSellerApprovedEmail({ email, name }) {
+  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+    throw new Error('Valid email is required');
+  }
+  const userName = name || 'there';
+  const mailOptions = {
+    from: `FOREMADE <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+    to: email,
+    subject: 'Congratulations! Your Pro Seller Application is Approved - FOREMADE',
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pro Seller Approved - FOREMADE</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #fff; color: #0F2940; }
+    .container { max-width: 600px; margin: 0 auto; padding: 30px; background: #f9f9f9; border-radius: 8px; }
+    .header { background-color: #0F2940; color: #fff; padding: 20px; border-radius: 8px 8px 0 0; }
+    .content { padding: 20px; }
+    .footer { font-size: 13px; color: #666; margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>Welcome to FOREMADE Pro Seller!</h2>
+    </div>
+    <div class="content">
+      <p>Hi ${userName},</p>
+      <p>Congratulations! Your application to become a <strong>Pro Seller</strong> on FOREMADE has been <span style="color: #28a745; font-weight: bold;">approved</span>.</p>
+      <p>You now have access to exclusive features, priority support, and more tools to grow your business.</p>
+      <p>Get started by logging in to your dashboard and exploring your new Pro Seller features.</p>
+      <a href="https://foremade.com/dashboard" style="display: inline-block; background: #0F2940; color: #fff; padding: 12px 24px; border-radius: 5px; text-decoration: none; margin-top: 20px;">Go to Dashboard</a>
+      <p style="margin-top: 30px;">Thank you for choosing FOREMADE. We look forward to your success!</p>
+      <p>Best regards,<br><strong>The FOREMADE Team</strong></p>
+    </div>
+    <div class="footer">
+      <p>Questions? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a></p>
+    </div>
+  </div>
+</body>
+</html>`
+  };
+  await transporter.sendMail(mailOptions);
+}
+
+// Pro Seller Rejected Email
+async function sendProSellerRejectedEmail({ email, name }) {
+  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+    throw new Error('Valid email is required');
+  }
+  const userName = name || 'there';
+  const mailOptions = {
+    from: `FOREMADE <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+    to: email,
+    subject: 'Update: Your Pro Seller Application Was Not Approved - FOREMADE',
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pro Seller Application Not Approved - FOREMADE</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #fff; color: #0F2940; }
+    .container { max-width: 600px; margin: 0 auto; padding: 30px; background: #f9f9f9; border-radius: 8px; }
+    .header { background-color: #d32f2f; color: #fff; padding: 20px; border-radius: 8px 8px 0 0; }
+    .content { padding: 20px; }
+    .footer { font-size: 13px; color: #666; margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>Pro Seller Application Update</h2>
+    </div>
+    <div class="content">
+      <p>Hi ${userName},</p>
+      <p>Thank you for applying to become a <strong>Pro Seller</strong> on FOREMADE.</p>
+      <p>Unfortunately, your application was <span style="color: #d32f2f; font-weight: bold;">not approved</span> at this time.</p>
+      <p>You are welcome to review your application and try again, or contact our support team for more information.</p>
+      <a href="mailto:support@foremade.com" style="display: inline-block; background: #d32f2f; color: #fff; padding: 12px 24px; border-radius: 5px; text-decoration: none; margin-top: 20px;">Contact Support</a>
+      <p style="margin-top: 30px;">We appreciate your interest in FOREMADE and hope to work with you in the future.</p>
+      <p>Best regards,<br><strong>The FOREMADE Team</strong></p>
+    </div>
+    <div class="footer">
+      <p>Questions? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a></p>
+    </div>
+  </div>
+</body>
+</html>`
   };
   await transporter.sendMail(mailOptions);
 }
@@ -462,7 +603,7 @@ async function sendProductRejectedEmail({ email, productName, reason }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Your Product Listing Has Been Rejected</h2>
   </div>
   <div class="content">
@@ -470,9 +611,9 @@ async function sendProductRejectedEmail({ email, productName, reason }) {
     <p>Thank you for submitting your product, <strong>${productName}</strong>, to FOREMADE.</p>
     <p>Unfortunately, your product listing has not been approved for the following reason:</p>
     <p class="reason">${reason}</p>
-    <p>We encourage you to review our <a href="https://foremade.com/seller-guidelines">seller guidelines</a> and make the necessary updates before resubmitting your product.</p>
+    <p>We encourage you to review our <a href="https://foremade.com/pro-seller-guide">seller guidelines</a> and make the necessary updates before resubmitting your product.</p>
     <p>If you believe this decision was made in error or need further clarification, please contact our support team.</p>
-    <a href="https://foremade.com/contact" class="button">Contact Support</a>
+    <a href="https://foremade.com/support" class="button">Contact Support</a>
     <p>Best regards,<br><strong>The FOREMADE Team</strong></p>
   </div>
   <div class="footer">
@@ -521,14 +662,14 @@ async function sendProductApprovedEmail({ email, productName }) {
 </head>
 <body>
   <div class="header">
-    <img src="https://foremade.com/logo.png" alt="FOREMADE Logo" />
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
     <h2>Your Product Listing Has Been Approved</h2>
   </div>
   <div class="content">
     <p><strong>Hello,</strong></p>
     <p>Congratulations! Your product, <span class="product-name">${productName}</span>, has been approved and is now live on FOREMADE.</p>
     <p>Your listing is ready for customers to discover and purchase. You can view or manage your listing in your seller dashboard.</p>
-    <a href="https://foremade.com/seller-dashboard" class="button">View Your Listing</a>
+    <a href="https://foremade.com/dashboard" class="button">View Your Listing</a>
     <p>Thank you for being a part of the FOREMADE marketplace. If you have any questions, our support team is here to help.</p>
     <p>Best regards,<br><strong>The FOREMADE Team</strong></p>
   </div>
@@ -555,6 +696,9 @@ module.exports = {
   sendFeedbackRequestEmail,
   sendAbandonedCartEmail,
   sendListingRejectedGenericEmail,
+  sendSupportRequestEmail,
+  sendProSellerApprovedEmail,
+  sendProSellerRejectedEmail,
   sendProductRejectedEmail,
   sendProductApprovedEmail,
 };
