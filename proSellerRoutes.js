@@ -1342,22 +1342,27 @@ router.get('/api/pro-seller/bump-quota', authenticateFirebaseToken, async (req, 
   try {
     const { uid } = req.user;
 
+    console.log(`Request for bump quota by user: ${uid}`); // Log the UID for debugging
+
     // Check if user is pro seller
     const proSellerQuery = query(collection(db, 'proSellers'), where('userId', '==', uid));
     const proSellerSnap = await getDocs(proSellerQuery);
     
     if (proSellerSnap.empty) {
+      console.log(`User ${uid} not found as pro seller`);
       return res.status(400).json({ error: 'User is not registered as a pro seller' });
     }
 
     const proSellerData = proSellerSnap.docs[0].data();
     if (!proSellerData.isActive || proSellerData.status !== 'approved') {
+      console.log(`User ${uid} pro seller account not active or approved: ${JSON.stringify(proSellerData)}`);
       return res.status(400).json({ error: 'Pro seller account is not active or approved' });
     }
 
-    // For now, return a fixed quota (e.g., 5). You can replace this with dynamic logic (e.g., from Firestore or a config).
-    const quota = 5; // Replace with actual quota tracking if needed
+    // For now, return a fixed quota (e.g., 5). Enhance later with dynamic tracking.
+    const quota = 5; // Replace with actual quota logic if needed (e.g., proSellerData.bumpsRemaining)
 
+    console.log(`Quota ${quota} returned for user ${uid}`);
     res.status(200).json({ status: 'success', quota });
   } catch (error) {
     console.error('Fetch bump quota error:', error);
