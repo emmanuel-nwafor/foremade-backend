@@ -27,28 +27,20 @@ const sendOTPEmail = async (email, otp) => {
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validatePassword = (password) => {
   const hasLength = password.length >= 6;
-  const hasLetter = /[a-zA-Z]/.test(password); // Check for any letter
+  const hasLetter = /[a-zA-Z]/.test(password); // Should catch 'Bi' in '@2110244500Bi'
   const hasNumber = /[0-9]/.test(password);
   const hasSpecialChar = /[_@!+=#$%^&*()[\]{}|;:,.<>?~`/-]/.test(password);
-  const isValid = hasLength && hasLetter && hasNumber && hasSpecialChar;
-  console.log('Password validation:', { password, hasLength, hasLetter, hasNumber, hasSpecialChar, isValid });
-  return isValid;
-};
-const generateUsername = (firstName, lastName) => {
-  const nameParts = [firstName, lastName].filter(part => part?.trim());
-  const firstPart = nameParts[0]?.slice(0, 4).toLowerCase() || 'user';
-  const secondPart = nameParts[1]?.slice(0, 3).toLowerCase() || '';
-  const randomNum = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return (firstPart + secondPart).replace(/[^a-z0-9]/g, '') + randomNum;
+  console.log('Password validation:', { password, hasLength, hasLetter, hasNumber, hasSpecialChar });
+  return hasLength && hasLetter && hasNumber && hasSpecialChar;
 };
 
 // Register endpoint
 router.post('/register', async (req, res) => {
   console.log('Received register request:', req.body);
-  const { firstName, lastName, email, password, phoneNumber } = req.body;
+  const { firstName, lastName, email, password, phoneNumber, username } = req.body;
 
   if (!firstName?.trim() || !lastName?.trim() || !validateEmail(email) || !password || !validatePassword(password)) {
-    console.error('Validation failed:', { firstName, lastName, email, password, phoneNumber });
+    console.error('Validation failed:', { firstName, lastName, email, password, phoneNumber, username });
     return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields or invalid password.' });
   }
 
@@ -107,10 +99,10 @@ router.post('/resend-otp', async (req, res) => {
 // Verify OTP and complete registration
 router.post('/verify-otp', async (req, res) => {
   console.log('Received verify OTP request:', req.body);
-  const { email, otp, firstName, lastName, password, phoneNumber } = req.body;
+  const { email, otp, firstName, lastName, password, phoneNumber, username } = req.body;
 
   if (!validateEmail(email) || !otp || !firstName?.trim() || !lastName?.trim() || !password || !validatePassword(password)) {
-    console.error('Validation failed for verify:', { email, otp, firstName, lastName, password, phoneNumber });
+    console.error('Validation failed for verify:', { email, otp, firstName, lastName, password, phoneNumber, username });
     return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields or invalid password.' });
   }
 
@@ -124,13 +116,13 @@ router.post('/verify-otp', async (req, res) => {
     const userRecord = await adminAuth.createUser({
       email,
       password,
-      displayName: generateUsername(firstName, lastName),
+      displayName: username, // Use frontend-generated username
     });
 
     const userData = {
       email,
       name: `${firstName} ${lastName}`,
-      username: generateUsername(firstName, lastName),
+      username,
       address: '',
       phoneNumber: phoneNumber || '',
       createdAt: new Date().toISOString(),
