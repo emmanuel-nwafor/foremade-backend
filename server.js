@@ -88,6 +88,7 @@ app.use(paymentRoutes);
 app.use(sellerRoutes);
 app.use(emailRoutes);
 app.use(bankRoutes);
+app.use(registerRoutes);
 app.use(recaptchaRoutes);
 app.use(uploadRoutes);
 app.use(proSellerRoutes);
