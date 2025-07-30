@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const nodemailer = require('nodemailer');
-const { db, adminAuth, adminDb } = require('./firebaseConfig');
+const { db, adminAuth, adminDb } = require('../firebaseConfig');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
@@ -42,15 +42,18 @@ const generateUsername = (firstName, lastName) => {
 
 // Register endpoint
 router.post('/register', async (req, res) => {
+  console.log('Received register request:', req.body);
   const { firstName, lastName, email, password, phoneNumber } = req.body;
 
-  if (!firstName.trim() || !lastName.trim() || !validateEmail(email) || !password || !validatePassword(password)) {
-    return res.status(400).json({ success: false, error: 'Invalid input data' });
+  if (!firstName?.trim() || !lastName?.trim() || !validateEmail(email) || !password || !validatePassword(password)) {
+    console.error('Validation failed:', { firstName, lastName, email, password, phoneNumber });
+    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields.' });
   }
 
   try {
     const existingUser = await adminAuth.getUserByEmail(email).catch(() => null);
     if (existingUser) {
+      console.log('Email already in use:', email);
       return res.status(400).json({ success: false, error: 'Email already in use. Log in instead.' });
     }
 
@@ -58,11 +61,12 @@ router.post('/register', async (req, res) => {
     const otpDocRef = adminDb.collection('otps').doc(email);
     await otpDocRef.set({
       otp,
-      expires: adminDb.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)), // 10-minute expiry
+      expires: adminDb.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)),
       createdAt: adminDb.FieldValue.serverTimestamp(),
     });
 
     await sendOTPEmail(email, otp);
+    console.log('OTP sent successfully for email:', email);
     res.json({ success: true, message: 'OTP sent to your email.' });
   } catch (err) {
     console.error('Registration error:', err);
@@ -72,9 +76,11 @@ router.post('/register', async (req, res) => {
 
 // Resend OTP endpoint
 router.post('/resend-otp', async (req, res) => {
+  console.log('Received resend OTP request:', req.body);
   const { email } = req.body;
 
   if (!validateEmail(email)) {
+    console.error('Invalid email for resend:', email);
     return res.status(400).json({ success: false, error: 'Invalid email' });
   }
 
@@ -88,6 +94,7 @@ router.post('/resend-otp', async (req, res) => {
     });
 
     await sendOTPEmail(email, otp);
+    console.log('New OTP sent successfully for email:', email);
     res.json({ success: true, message: 'New OTP sent to your email.' });
   } catch (err) {
     console.error('Resend OTP error:', err);
@@ -97,15 +104,18 @@ router.post('/resend-otp', async (req, res) => {
 
 // Verify OTP and complete registration
 router.post('/verify-otp', async (req, res) => {
+  console.log('Received verify OTP request:', req.body);
   const { email, otp, firstName, lastName, password, phoneNumber } = req.body;
 
-  if (!validateEmail(email) || !otp || !firstName || !lastName || !password || !validatePassword(password)) {
-    return res.status(400).json({ success: false, error: 'Invalid input data' });
+  if (!validateEmail(email) || !otp || !firstName?.trim() || !lastName?.trim() || !password || !validatePassword(password)) {
+    console.error('Validation failed for verify:', { email, otp, firstName, lastName, password, phoneNumber });
+    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields.' });
   }
 
   try {
     const otpDoc = await adminDb.collection('otps').doc(email).get();
     if (!otpDoc.exists || otpDoc.data().otp !== otp || otpDoc.data().expires.toDate() < new Date()) {
+      console.log('Invalid or expired OTP for email:', email);
       return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
     }
 
@@ -134,9 +144,10 @@ router.post('/verify-otp', async (req, res) => {
       details: { user_id: userRecord.uid, email },
     });
 
-    await adminDb.collection('otps').doc(email).delete(); // Clean up OTP
+    await adminDb.collection('otps').doc(email).delete();
     await adminAuth.generateEmailVerificationLink(email);
 
+    console.log('User created successfully for email:', email);
     res.json({ success: true, message: 'Account created successfully.' });
   } catch (err) {
     console.error('OTP verification error:', err);
