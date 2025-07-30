@@ -12,6 +12,7 @@ const recaptchaRoutes = require('./recaptchaRoutes');
 const uploadRoutes = require('./uploadRoutes');
 const proSellerRoutes = require('./proSellerRoutes');
 const authRoutes = require('./authRoutes');
+const registerRoutes = require('./registerRoutes');
 
 const app = express();
 
