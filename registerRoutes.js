@@ -36,8 +36,9 @@ const validatePassword = (password) => {
 
 // Register endpoint
 router.post('/register', async (req, res) => {
-  console.log('Received register request - Raw body:', req.body);
-  const { firstName, lastName, email, password, phoneNumber, username } = req.body;
+  console.log('Received register request - Raw body:', req.body); // Log the raw body
+  const { firstName, lastName, email, password, phoneNumber, username } = req.body || {};
+  console.log('Destructured data:', { firstName, lastName, email, password, phoneNumber, username }); // Debug log
 
   if (!firstName?.trim()) {
     console.error('Validation failed: firstName missing or empty');
