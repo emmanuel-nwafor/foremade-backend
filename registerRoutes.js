@@ -3,6 +3,9 @@ const router = express.Router();
 const nodemailer = require('nodemailer');
 const { db, adminAuth, adminDb } = require('./firebaseConfig');
 
+const app = express(); // Create app instance if not already in main file
+app.use(express.json()); // Add JSON body parsing
+
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
 const transporter = nodemailer.createTransport({
@@ -27,7 +30,7 @@ const sendOTPEmail = async (email, otp) => {
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validatePassword = (password) => {
   const hasLength = password.length >= 6;
-  const hasLetter = /[a-zA-Z]/.test(password); // Should catch 'Bi' in '@2110244500Bi'
+  const hasLetter = /[a-zA-Z]/.test(password);
   const hasNumber = /[0-9]/.test(password);
   const hasSpecialChar = /[_@!+=#$%^&*()[\]{}|;:,.<>?~`/-]/.test(password);
   console.log('Password validation:', { password, hasLength, hasLetter, hasNumber, hasSpecialChar });
@@ -36,12 +39,28 @@ const validatePassword = (password) => {
 
 // Register endpoint
 router.post('/register', async (req, res) => {
-  console.log('Received register request:', req.body);
+  console.log('Received register request - Raw body:', req.body);
   const { firstName, lastName, email, password, phoneNumber, username } = req.body;
 
-  if (!firstName?.trim() || !lastName?.trim() || !validateEmail(email) || !password || !validatePassword(password)) {
-    console.error('Validation failed:', { firstName, lastName, email, password, phoneNumber, username });
-    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields or invalid password.' });
+  if (!firstName?.trim()) {
+    console.error('Validation failed: firstName missing or empty');
+    return res.status(400).json({ success: false, error: 'First name is required.' });
+  }
+  if (!lastName?.trim()) {
+    console.error('Validation failed: lastName missing or empty');
+    return res.status(400).json({ success: false, error: 'Last name is required.' });
+  }
+  if (!validateEmail(email)) {
+    console.error('Validation failed: invalid email');
+    return res.status(400).json({ success: false, error: 'Invalid email format.' });
+  }
+  if (!password) {
+    console.error('Validation failed: password missing');
+    return res.status(400).json({ success: false, error: 'Password is required.' });
+  }
+  if (!validatePassword(password)) {
+    console.error('Validation failed: invalid password');
+    return res.status(400).json({ success: false, error: 'Password must have 6+ chars, a letter, a number, and a special char.' });
   }
 
   try {
@@ -101,9 +120,29 @@ router.post('/verify-otp', async (req, res) => {
   console.log('Received verify OTP request:', req.body);
   const { email, otp, firstName, lastName, password, phoneNumber, username } = req.body;
 
-  if (!validateEmail(email) || !otp || !firstName?.trim() || !lastName?.trim() || !password || !validatePassword(password)) {
-    console.error('Validation failed for verify:', { email, otp, firstName, lastName, password, phoneNumber, username });
-    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields or invalid password.' });
+  if (!firstName?.trim()) {
+    console.error('Validation failed: firstName missing or empty');
+    return res.status(400).json({ success: false, error: 'First name is required.' });
+  }
+  if (!lastName?.trim()) {
+    console.error('Validation failed: lastName missing or empty');
+    return res.status(400).json({ success: false, error: 'Last name is required.' });
+  }
+  if (!validateEmail(email)) {
+    console.error('Validation failed: invalid email');
+    return res.status(400).json({ success: false, error: 'Invalid email format.' });
+  }
+  if (!otp) {
+    console.error('Validation failed: otp missing');
+    return res.status(400).json({ success: false, error: 'OTP is required.' });
+  }
+  if (!password) {
+    console.error('Validation failed: password missing');
+    return res.status(400).json({ success: false, error: 'Password is required.' });
+  }
+  if (!validatePassword(password)) {
+    console.error('Validation failed: invalid password');
+    return res.status(400).json({ success: false, error: 'Password must have 6+ chars, a letter, a number, and a special char.' });
   }
 
   try {
@@ -116,7 +155,7 @@ router.post('/verify-otp', async (req, res) => {
     const userRecord = await adminAuth.createUser({
       email,
       password,
-      displayName: username, // Use frontend-generated username
+      displayName: username,
     });
 
     const userData = {
