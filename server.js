@@ -16,7 +16,10 @@ const registerRoutes = require('./registerRoutes');
 
 const app = express();
 
-// Setup middleware
+// Add JSON body parsing middleware
+app.use(express.json());
+
+// Setup other middleware
 setupMiddleware(app);
 
 // Swagger configuration

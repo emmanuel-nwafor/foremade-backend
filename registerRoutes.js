@@ -3,9 +3,6 @@ const router = express.Router();
 const nodemailer = require('nodemailer');
 const { db, adminAuth, adminDb } = require('./firebaseConfig');
 
-const app = express(); // Create app instance if not already in main file
-app.use(express.json()); // Add JSON body parsing
-
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
 const transporter = nodemailer.createTransport({
