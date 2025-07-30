@@ -27,10 +27,12 @@ const sendOTPEmail = async (email, otp) => {
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validatePassword = (password) => {
   const hasLength = password.length >= 6;
-  const hasLetter = /[a-zA-Z]/.test(password);
+  const hasLetter = /[a-zA-Z]/.test(password); // Check for any letter
   const hasNumber = /[0-9]/.test(password);
   const hasSpecialChar = /[_@!+=#$%^&*()[\]{}|;:,.<>?~`/-]/.test(password);
-  return hasLength && hasLetter && hasNumber && hasSpecialChar;
+  const isValid = hasLength && hasLetter && hasNumber && hasSpecialChar;
+  console.log('Password validation:', { password, hasLength, hasLetter, hasNumber, hasSpecialChar, isValid });
+  return isValid;
 };
 const generateUsername = (firstName, lastName) => {
   const nameParts = [firstName, lastName].filter(part => part?.trim());
@@ -47,7 +49,7 @@ router.post('/register', async (req, res) => {
 
   if (!firstName?.trim() || !lastName?.trim() || !validateEmail(email) || !password || !validatePassword(password)) {
     console.error('Validation failed:', { firstName, lastName, email, password, phoneNumber });
-    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields.' });
+    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields or invalid password.' });
   }
 
   try {
@@ -109,7 +111,7 @@ router.post('/verify-otp', async (req, res) => {
 
   if (!validateEmail(email) || !otp || !firstName?.trim() || !lastName?.trim() || !password || !validatePassword(password)) {
     console.error('Validation failed for verify:', { email, otp, firstName, lastName, password, phoneNumber });
-    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields.' });
+    return res.status(400).json({ success: false, error: 'Invalid input data. Missing required fields or invalid password.' });
   }
 
   try {
