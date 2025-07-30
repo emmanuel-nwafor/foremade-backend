@@ -39,11 +39,12 @@ const validatePassword = (password) => {
   return hasLength && hasLetter && hasNumber && hasSpecialChar;
 };
 
-// Register endpoint with detailed logging
+// Register endpoint with max debugging
 router.post('/register', async (req, res) => {
+  console.log('Request headers:', JSON.stringify(req.headers, null, 2)); // Log headers
   console.log('Raw request body:', JSON.stringify(req.body, null, 2)); // Log raw body
   if (!req.body || Object.keys(req.body).length === 0) {
-    console.error('No body received in request');
+    console.error('No body received in request. Headers:', JSON.stringify(req.headers));
     return res.status(400).json({ success: false, error: 'No data received' });
   }
 
