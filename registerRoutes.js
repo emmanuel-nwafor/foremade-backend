@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const nodemailer = require('nodemailer');
-const { db, adminDb } = require('./firebaseConfig');
+const { db } = require('./firebaseConfig'); // Use client SDK Firestore
+const { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore'); // Client SDK imports
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
@@ -44,11 +45,11 @@ router.post('/send-otp', async (req, res) => {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
 
     const otp = generateOTP();
-    const otpDocRef = adminDb.collection('otps').doc(email);
-    await otpDocRef.set({
+    const otpRef = doc(collection(db, 'otps'), email);
+    await setDoc(otpRef, {
       otp,
-      expires: new Date(Date.now() + 10 * 60 * 1000), // Use plain JavaScript Date
-      createdAt: adminDb.FieldValue.serverTimestamp(),
+      expires: new Date(Date.now() + 10 * 60 * 1000), // Plain JavaScript Date
+      createdAt: serverTimestamp(), // Client SDK serverTimestamp
     }).catch(err => {
       console.error('Firestore set OTP error:', err);
       throw err;
@@ -75,14 +76,14 @@ router.post('/resend-otp', async (req, res) => {
   try {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
 
-    const otpDoc = await adminDb.collection('otps').doc(email).get();
-    if (!otpDoc.exists) throw new Error('No pending verification for this email.');
+    const otpDoc = await getDoc(doc(db, 'otps', email));
+    if (!otpDoc.exists()) throw new Error('No pending verification for this email.');
 
     const otp = generateOTP();
-    await adminDb.collection('otps').doc(email).update({
+    await updateDoc(doc(db, 'otps', email), {
       otp,
-      expires: new Date(Date.now() + 10 * 60 * 1000), // Use plain JavaScript Date
-      createdAt: adminDb.FieldValue.serverTimestamp(),
+      expires: new Date(Date.now() + 10 * 60 * 1000), // Plain JavaScript Date
+      createdAt: serverTimestamp(), // Client SDK serverTimestamp
     }).catch(err => {
       console.error('Firestore update OTP error:', err);
       throw err;
@@ -107,16 +108,16 @@ router.post('/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
 
   try {
-    const otpDoc = await adminDb.collection('otps').doc(email).get().catch(err => {
+    const otpDoc = await getDoc(doc(db, 'otps', email)).catch(err => {
       console.error('Firestore get OTP error:', err);
       throw err;
     });
-    if (!otpDoc.exists || otpDoc.data().otp !== otp || otpDoc.data().expires < new Date()) {
+    if (!otpDoc.exists() || otpDoc.data().otp !== otp || otpDoc.data().expires < new Date()) {
       console.log('Invalid or expired OTP for email:', email);
       return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
     }
 
-    await adminDb.collection('otps').doc(email).delete().catch(err => {
+    await deleteDoc(doc(db, 'otps', email)).catch(err => {
       console.error('Firestore delete OTP error:', err);
       throw err;
     });
@@ -141,8 +142,8 @@ router.post('/verify-otp-status', async (req, res) => {
   try {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
 
-    const otpDoc = await adminDb.collection('otps').doc(email).get();
-    if (otpDoc.exists) {
+    const otpDoc = await getDoc(doc(db, 'otps', email));
+    if (otpDoc.exists()) {
       return res.json({ success: false, error: 'Email not yet verified. Please check your OTP.' });
     }
 
