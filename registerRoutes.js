@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const nodemailer = require('nodemailer');
 const { db } = require('./firebaseConfig'); // Use client SDK Firestore
-const { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore'); // Client SDK imports
+const { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp } = require('firebase/firestore'); // Client SDK imports
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
@@ -46,14 +46,14 @@ router.post('/send-otp', async (req, res) => {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
 
     const otp = generateOTP();
-    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+    const expires = Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)); // 10 minutes from now as Timestamp
     const otpRef = doc(collection(db, 'otps'), email);
     await setDoc(otpRef, {
       otp,
       expires,
       createdAt: serverTimestamp(), // Client SDK serverTimestamp
     });
-    console.log('OTP document set:', { email, otp, expires });
+    console.log('OTP document set:', { email, otp, expires: expires.toDate() });
 
     await sendOTPEmail(email, otp);
     console.log('OTP sent successfully for email:', email);
@@ -80,7 +80,7 @@ router.post('/resend-otp', async (req, res) => {
     if (!otpDoc.exists()) throw new Error('No pending verification for this email.');
 
     const otp = generateOTP();
-    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+    const expires = Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)); // 10 minutes from now as Timestamp
     await updateDoc(doc(db, 'otps', email), {
       otp,
       expires,
@@ -128,7 +128,11 @@ router.post('/verify-otp', async (req, res) => {
 
     const otpData = otpDoc.data();
     console.log('Comparing OTPs:', { stored: otpData.otp, provided: otp });
-    console.log('Expiration check:', { storedExpires: otpData.expires, currentTime: new Date(), isExpired: otpData.expires < new Date() });
+    console.log('Expiration check:', {
+      storedExpires: otpData.expires.toDate(),
+      currentTime: new Date(),
+      isExpired: otpData.expires.toDate() < new Date(),
+    });
 
     if (otpData.otp !== otp) {
       console.log('OTP mismatch:', { stored: otpData.otp, provided: otp });
@@ -137,8 +141,11 @@ router.post('/verify-otp', async (req, res) => {
 
     // Add a 30-second buffer to account for potential delays
     const currentTimeWithBuffer = new Date(Date.now() + 30 * 1000);
-    if (otpData.expires < currentTimeWithBuffer) {
-      console.log('OTP expired with buffer:', { storedExpires: otpData.expires, currentTime: currentTimeWithBuffer });
+    if (otpData.expires.toDate() < currentTimeWithBuffer) {
+      console.log('OTP expired with buffer:', {
+        storedExpires: otpData.expires.toDate(),
+        currentTime: currentTimeWithBuffer,
+      });
       await deleteDoc(doc(db, 'otps', email)).catch(err => console.error('Failed to delete expired OTP:', err));
       return res.status(400).json({ success: false, error: 'Verification code has expired. Please request a new one.' });
     }
