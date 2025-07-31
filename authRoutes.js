@@ -14,16 +14,16 @@ router.use('/admin/*all', async (req, res, next) => {
   try {
     const userId = req.headers['x-user-id'];
     if (!userId) {
-      return res.status(401).json({ error: 'User ID required' });
+      return res.redirect('/login');
     }
     const userRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userRef);
     if (!userSnap.exists() || !ADMIN_EMAILS.includes(userSnap.data().email)) {
-      return res.status(403).json({ error: 'Access denied: Admin role required' });
+      return res.redirect('/login');
     }
     next();
   } catch (error) {
-    res.status(500).json({ error: 'Authorization failed: ' + error.message });
+    res.redirect('/login');
   }
 });
 

@@ -12,7 +12,7 @@ const recaptchaRoutes = require('./recaptchaRoutes');
 const uploadRoutes = require('./uploadRoutes');
 const proSellerRoutes = require('./proSellerRoutes');
 const authRoutes = require('./authRoutes');
-const registerRoutes = require('./registerRoutes');
+const otpRoutes = require('./otpRoutes');
 
 const app = express();
 
@@ -91,7 +91,7 @@ app.use(paymentRoutes);
 app.use(sellerRoutes);
 app.use(emailRoutes);
 app.use(bankRoutes);
-app.use(registerRoutes);
+app.use(otpRoutes);
 app.use(recaptchaRoutes);
 app.use(uploadRoutes);
 app.use(proSellerRoutes);
