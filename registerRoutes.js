@@ -46,20 +46,21 @@ router.post('/send-otp', async (req, res) => {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
 
     const otp = generateOTP();
+    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
     const otpRef = doc(collection(db, 'otps'), email);
-    const result = await setDoc(otpRef, {
+    await setDoc(otpRef, {
       otp,
-      expires: new Date(Date.now() + 10 * 60 * 1000), // Plain JavaScript Date
+      expires,
       createdAt: serverTimestamp(), // Client SDK serverTimestamp
     });
-    console.log('OTP document set:', { email, otp, expires: new Date(Date.now() + 10 * 60 * 1000) });
+    console.log('OTP document set:', { email, otp, expires });
 
     await sendOTPEmail(email, otp);
     console.log('OTP sent successfully for email:', email);
     res.json({ success: true, message: 'OTP sent to your email.' });
   } catch (err) {
     console.error('Send OTP error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Failed to send OTP. Please try again.' });
+    res.status(500).json({ success: false, error: 'Failed to send OTP. Please try again.' });
   }
 });
 
@@ -79,9 +80,10 @@ router.post('/resend-otp', async (req, res) => {
     if (!otpDoc.exists()) throw new Error('No pending verification for this email.');
 
     const otp = generateOTP();
+    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
     await updateDoc(doc(db, 'otps', email), {
       otp,
-      expires: new Date(Date.now() + 10 * 60 * 1000), // Plain JavaScript Date
+      expires,
       createdAt: serverTimestamp(), // Client SDK serverTimestamp
     }).catch(err => {
       console.error('Firestore update OTP error:', err);
@@ -93,7 +95,7 @@ router.post('/resend-otp', async (req, res) => {
     res.json({ success: true, message: 'New OTP sent to your email.' });
   } catch (err) {
     console.error('Resend OTP error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Failed to resend OTP. Please try again.' });
+    res.status(500).json({ success: false, error: 'Failed to resend OTP. Please try again.' });
   }
 });
 
@@ -126,14 +128,17 @@ router.post('/verify-otp', async (req, res) => {
 
     const otpData = otpDoc.data();
     console.log('Comparing OTPs:', { stored: otpData.otp, provided: otp });
+    console.log('Expiration check:', { storedExpires: otpData.expires, currentTime: new Date(), isExpired: otpData.expires < new Date() });
 
     if (otpData.otp !== otp) {
       console.log('OTP mismatch:', { stored: otpData.otp, provided: otp });
       return res.status(400).json({ success: false, error: 'Incorrect verification code. Please try again.' });
     }
 
-    if (otpData.expires < new Date()) {
-      console.log('OTP expired:', { storedExpires: otpData.expires, currentTime: new Date() });
+    // Add a 30-second buffer to account for potential delays
+    const currentTimeWithBuffer = new Date(Date.now() + 30 * 1000);
+    if (otpData.expires < currentTimeWithBuffer) {
+      console.log('OTP expired with buffer:', { storedExpires: otpData.expires, currentTime: currentTimeWithBuffer });
       await deleteDoc(doc(db, 'otps', email)).catch(err => console.error('Failed to delete expired OTP:', err));
       return res.status(400).json({ success: false, error: 'Verification code has expired. Please request a new one.' });
     }
