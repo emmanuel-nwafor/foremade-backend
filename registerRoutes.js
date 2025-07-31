@@ -100,21 +100,38 @@ router.post('/resend-otp', async (req, res) => {
 
 // Verify OTP
 router.post('/verify-otp', async (req, res) => {
-  console.log('Verify OTP request:', JSON.stringify(req.body, null, 2));
+  console.log('Verify OTP request received:', JSON.stringify(req.body, null, 2));
   if (!req.body || !req.body.email || !req.body.otp) {
-    return res.status(400).json({ success: false, error: 'Email and OTP are required' });
+    console.log('Missing data:', req.body);
+    return res.status(400).json({ success: false, error: 'Email and verification code are required' });
   }
 
   const { email, otp } = req.body;
 
   try {
+    if (!validateEmail(email)) throw new Error('Invalid email format.');
+
     const otpDoc = await getDoc(doc(db, 'otps', email)).catch(err => {
       console.error('Firestore get OTP error:', err);
       throw err;
     });
-    if (!otpDoc.exists() || otpDoc.data().otp !== otp || otpDoc.data().expires < new Date()) {
-      console.log('Invalid or expired OTP for email:', email);
-      return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
+    console.log('OTP document data:', otpDoc.exists() ? otpDoc.data() : 'Not found');
+
+    if (!otpDoc.exists()) {
+      console.log('No OTP document for email:', email);
+      return res.status(400).json({ success: false, error: 'No verification code found. Please request a new one.' });
+    }
+
+    const otpData = otpDoc.data();
+    if (otpData.otp !== otp) {
+      console.log('OTP mismatch:', { stored: otpData.otp, provided: otp });
+      return res.status(400).json({ success: false, error: 'Incorrect verification code. Please try again.' });
+    }
+
+    if (otpData.expires < new Date()) {
+      console.log('OTP expired:', otpData.expires);
+      await deleteDoc(doc(db, 'otps', email)).catch(err => console.error('Failed to delete expired OTP:', err));
+      return res.status(400).json({ success: false, error: 'Verification code has expired. Please request a new one.' });
     }
 
     await deleteDoc(doc(db, 'otps', email)).catch(err => {
@@ -126,7 +143,7 @@ router.post('/verify-otp', async (req, res) => {
     res.json({ success: true, message: 'Email verified successfully.' });
   } catch (err) {
     console.error('Verify OTP error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Verification failed.' });
+    res.status(500).json({ success: false, error: err.message || 'Verification failed. Please try again.' });
   }
 });
 
@@ -144,7 +161,7 @@ router.post('/verify-otp-status', async (req, res) => {
 
     const otpDoc = await getDoc(doc(db, 'otps', email));
     if (otpDoc.exists()) {
-      return res.json({ success: false, error: 'Email not yet verified. Please check your OTP.' });
+      return res.json({ success: false, error: 'Email not yet verified. Please check your verification code.' });
     }
 
     res.json({ success: true, message: 'Email verified.' });
