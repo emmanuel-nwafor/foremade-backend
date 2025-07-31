@@ -47,7 +47,7 @@ router.post('/send-otp', async (req, res) => {
     const otpDocRef = adminDb.collection('otps').doc(email);
     await otpDocRef.set({
       otp,
-      expires: adminDb.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)),
+      expires: new Date(Date.now() + 10 * 60 * 1000), // Use plain JavaScript Date
       createdAt: adminDb.FieldValue.serverTimestamp(),
     }).catch(err => {
       console.error('Firestore set OTP error:', err);
@@ -81,7 +81,7 @@ router.post('/resend-otp', async (req, res) => {
     const otp = generateOTP();
     await adminDb.collection('otps').doc(email).update({
       otp,
-      expires: adminDb.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)),
+      expires: new Date(Date.now() + 10 * 60 * 1000), // Use plain JavaScript Date
       createdAt: adminDb.FieldValue.serverTimestamp(),
     }).catch(err => {
       console.error('Firestore update OTP error:', err);
@@ -111,7 +111,7 @@ router.post('/verify-otp', async (req, res) => {
       console.error('Firestore get OTP error:', err);
       throw err;
     });
-    if (!otpDoc.exists || otpDoc.data().otp !== otp || otpDoc.data().expires.toDate() < new Date()) {
+    if (!otpDoc.exists || otpDoc.data().otp !== otp || otpDoc.data().expires < new Date()) {
       console.log('Invalid or expired OTP for email:', email);
       return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
     }
