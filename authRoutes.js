@@ -10,16 +10,43 @@ const ADMIN_EMAILS = [
   'support@foremade.com',
 ];
 
-router.use('/admin/*all', async (req, res, next) => {
+router.use((req, res, next) => {
+  // Check for authentication token or user ID (assuming x-user-id as a placeholder)
+  const userId = req.headers['x-user-id'];
+  if (!userId) {
+    return res.redirect('/login');
+  }
+  next();
+});
+
+// Admin routes - redirect to login if not authenticated, no role check yet
+router.use('/admin/*', (req, res, next) => {
+  const userId = req.headers['x-user-id'];
+  if (!userId) {
+    return res.redirect('/login');
+  }
+  next();
+});
+
+// Seller routes - redirect to login if not authenticated
+router.use('/seller/*', (req, res, next) => {
+  const userId = req.headers['x-user-id'];
+  if (!userId) {
+    return res.redirect('/login');
+  }
+  next();
+});
+
+// Optional: Add role-based checks if needed later
+router.use('/admin/*', async (req, res, next) => {
   try {
     const userId = req.headers['x-user-id'];
-    if (!userId) {
-      return res.redirect('/login');
-    }
-    const userRef = doc(db, 'users', userId);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists() || !ADMIN_EMAILS.includes(userSnap.data().email)) {
-      return res.redirect('/login');
+    if (userId) {
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists() || !ADMIN_EMAILS.includes(userSnap.data().email)) {
+        return res.redirect('/login'); // Redirect non-admins to login
+      }
     }
     next();
   } catch (error) {
@@ -27,20 +54,19 @@ router.use('/admin/*all', async (req, res, next) => {
   }
 });
 
-router.use('/seller/*all', async (req, res, next) => {
+router.use('/seller/*', async (req, res, next) => {
   try {
     const userId = req.headers['x-user-id'];
-    if (!userId) {
-      return res.status(401).json({ error: 'User ID required' });
-    }
-    const userRef = doc(db, 'users', userId);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists() || !['Seller', 'Admin'].includes(userSnap.data().role)) {
-      return res.status(403).json({ error: 'Access denied: Seller or Admin role required' });
+    if (userId) {
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists() || !['Seller', 'Admin'].includes(userSnap.data().role)) {
+        return res.redirect('/login'); // Redirect non-sellers to login
+      }
     }
     next();
   } catch (error) {
-    res.status(500).json({ error: 'Authorization failed: ' + error.message });
+    res.redirect('/login');
   }
 });
 
