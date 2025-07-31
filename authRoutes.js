@@ -10,8 +10,8 @@ const ADMIN_EMAILS = [
   'support@foremade.com',
 ];
 
+// Global authentication check
 router.use((req, res, next) => {
-  // Check for authentication token or user ID (assuming x-user-id as a placeholder)
   const userId = req.headers['x-user-id'];
   if (!userId) {
     return res.redirect('/login');
@@ -19,7 +19,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// Admin routes - redirect to login if not authenticated, no role check yet
+// Admin routes - redirect to login if not authenticated
 router.use('/admin/*', (req, res, next) => {
   const userId = req.headers['x-user-id'];
   if (!userId) {
@@ -37,7 +37,7 @@ router.use('/seller/*', (req, res, next) => {
   next();
 });
 
-// Optional: Add role-based checks if needed later
+// Optional: Add role-based checks (currently redirects all unauthorized to login)
 router.use('/admin/*', async (req, res, next) => {
   try {
     const userId = req.headers['x-user-id'];
