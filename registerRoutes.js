@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const nodemailer = require('nodemailer');
-const { db, adminAuth, adminDb } = require('./firebaseConfig');
+const { db, adminDb } = require('./firebaseConfig');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
@@ -17,7 +17,7 @@ const sendOTPEmail = async (email, otp) => {
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
-    subject: 'Your OTP for Registration',
+    subject: 'Your OTP for Login Verification',
     text: `Your OTP is ${otp}. It expires in 10 minutes. Do not share it with anyone.`,
   };
 
@@ -30,32 +30,18 @@ const sendOTPEmail = async (email, otp) => {
 };
 
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-const validatePassword = (password) => {
-  const hasLength = password.length >= 6;
-  const hasLetter = /[a-zA-Z]/.test(password);
-  const hasNumber = /[0-9]/.test(password);
-  const hasSpecialChar = /[_@!+=#$%^&*()[\]{}|;:,.<>?~`/-]/.test(password);
-  return hasLength && hasLetter && hasNumber && hasSpecialChar;
-};
 
-// Initiate OTP for signup
-router.post('/initiate-otp', async (req, res) => {
-  console.log('Initiate OTP request:', JSON.stringify(req.body, null, 2));
-  const { firstName, lastName, email, password, phoneNumber, username } = req.body;
+// Send OTP before login
+router.post('/send-otp', async (req, res) => {
+  console.log('Send OTP request:', JSON.stringify(req.body, null, 2));
+  if (!req.body || !req.body.email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+
+  const { email } = req.body;
 
   try {
-    if (!firstName?.trim()) throw new Error('First name is required.');
-    if (!lastName?.trim()) throw new Error('Last name is required.');
     if (!validateEmail(email)) throw new Error('Invalid email format.');
-    if (!password) throw new Error('Password is required.');
-    if (!validatePassword(password)) throw new Error('Password must have 6+ chars, a letter, a number, and a special char.');
-    if (phoneNumber && !/^\+\d{7,15}$/.test(phoneNumber)) throw new Error('Invalid phone number format.');
-
-    const existingUser = await adminAuth.getUserByEmail(email).catch(err => {
-      console.error('Firebase getUserByEmail error:', err);
-      throw err;
-    });
-    if (existingUser) throw new Error('Email already in use. Log in instead.');
 
     const otp = generateOTP();
     const otpDocRef = adminDb.collection('otps').doc(email);
@@ -63,11 +49,6 @@ router.post('/initiate-otp', async (req, res) => {
       otp,
       expires: adminDb.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)),
       createdAt: adminDb.FieldValue.serverTimestamp(),
-      firstName,
-      lastName,
-      password,
-      phoneNumber,
-      username,
     }).catch(err => {
       console.error('Firestore set OTP error:', err);
       throw err;
@@ -77,8 +58,8 @@ router.post('/initiate-otp', async (req, res) => {
     console.log('OTP sent successfully for email:', email);
     res.json({ success: true, message: 'OTP sent to your email.' });
   } catch (err) {
-    console.error('Initiate OTP error:', err.message || err);
-    res.status(400).json({ success: false, error: err.message || 'Failed to initiate OTP.' });
+    console.error('Send OTP error:', err.message || err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to send OTP.' });
   }
 });
 
@@ -95,7 +76,7 @@ router.post('/resend-otp', async (req, res) => {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
 
     const otpDoc = await adminDb.collection('otps').doc(email).get();
-    if (!otpDoc.exists) throw new Error('No pending registration for this email.');
+    if (!otpDoc.exists) throw new Error('No pending verification for this email.');
 
     const otp = generateOTP();
     await adminDb.collection('otps').doc(email).update({
@@ -116,7 +97,7 @@ router.post('/resend-otp', async (req, res) => {
   }
 });
 
-// Verify OTP and create user
+// Verify OTP
 router.post('/verify-otp', async (req, res) => {
   console.log('Verify OTP request:', JSON.stringify(req.body, null, 2));
   if (!req.body || !req.body.email || !req.body.otp) {
@@ -135,45 +116,40 @@ router.post('/verify-otp', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
     }
 
-    const { firstName, lastName, password, phoneNumber, username } = otpDoc.data();
-    const userRecord = await adminAuth.createUser({
-      email,
-      password,
-      displayName: username,
-    }).catch(err => {
-      console.error('Firebase createUser error:', err);
-      throw err;
-    });
-
-    const userData = {
-      email,
-      name: `${firstName} ${lastName}`,
-      username,
-      phoneNumber: phoneNumber || '',
-      createdAt: new Date().toISOString(),
-      uid: userRecord.uid,
-      profileImage: null,
-      role: 'Buyer', // Default role
-    };
-    await adminDb.collection('users').doc(userRecord.uid).set(userData).catch(err => {
-      console.error('Firestore set user data error:', err);
-      throw err;
-    });
-
     await adminDb.collection('otps').doc(email).delete().catch(err => {
       console.error('Firestore delete OTP error:', err);
       throw err;
     });
-    await adminAuth.generateEmailVerificationLink(email).catch(err => {
-      console.error('Firebase email verification link error:', err);
-      throw err;
-    });
 
-    console.log('User created successfully for email:', email);
-    res.json({ success: true, message: 'Account created successfully. Check your email for verification.' });
+    console.log('OTP verified successfully for email:', email);
+    res.json({ success: true, message: 'Email verified successfully.' });
   } catch (err) {
     console.error('Verify OTP error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Account creation failed.' });
+    res.status(500).json({ success: false, error: err.message || 'Verification failed.' });
+  }
+});
+
+// Check OTP verification status
+router.post('/verify-otp-status', async (req, res) => {
+  console.log('Verify OTP status request:', JSON.stringify(req.body, null, 2));
+  if (!req.body || !req.body.email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+
+  const { email } = req.body;
+
+  try {
+    if (!validateEmail(email)) throw new Error('Invalid email format.');
+
+    const otpDoc = await adminDb.collection('otps').doc(email).get();
+    if (otpDoc.exists) {
+      return res.json({ success: false, error: 'Email not yet verified. Please check your OTP.' });
+    }
+
+    res.json({ success: true, message: 'Email verified.' });
+  } catch (err) {
+    console.error('Verify OTP status error:', err.message || err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to check verification status.' });
   }
 });
 
