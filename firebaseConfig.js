@@ -18,30 +18,21 @@ const db = getFirestore(appFirebase);
 // Admin SDK config (for server-side authentication)
 let adminApp;
 try {
-  // Try to initialize with service account key
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-    adminApp = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      projectId: process.env.FIREBASE_PROJECT_ID
-    });
-  } else {
-    // Fallback to default credentials (for development)
-    adminApp = admin.initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID
-    });
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY is not set in the environment');
   }
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+  adminApp = admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: process.env.FIREBASE_PROJECT_ID,
+  }, 'adminApp'); // Optional: Add a unique app name to avoid conflicts
+  console.log('Firebase Admin SDK initialized successfully');
 } catch (error) {
-  console.warn('Firebase Admin SDK initialization warning:', error.message);
-  console.log('Using client SDK only. For production, set FIREBASE_SERVICE_ACCOUNT_KEY');
+  console.error('Firebase Admin SDK initialization error:', error.message);
+  throw new Error('Failed to initialize Admin SDK. Ensure FIREBASE_SERVICE_ACCOUNT_KEY is set with a valid service account JSON.');
 }
 
-const adminAuth = adminApp ? admin.auth(adminApp) : null;
-const adminDb = adminApp ? admin.firestore(adminApp) : null;
+const adminAuth = admin.auth(adminApp);
+const adminDb = admin.firestore(adminApp);
 
-module.exports = { 
-  db, 
-  adminAuth, 
-  adminDb,
-  admin 
-};
+module.exports = { db, adminAuth, adminDb, admin };

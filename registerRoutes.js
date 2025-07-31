@@ -35,21 +35,13 @@ const validatePassword = (password) => {
   const hasLetter = /[a-zA-Z]/.test(password);
   const hasNumber = /[0-9]/.test(password);
   const hasSpecialChar = /[_@!+=#$%^&*()[\]{}|;:,.<>?~`/-]/.test(password);
-  console.log('Password validation:', { password, hasLength, hasLetter, hasNumber, hasSpecialChar });
   return hasLength && hasLetter && hasNumber && hasSpecialChar;
 };
 
-// Register endpoint with max debugging
-router.post('/register', async (req, res) => {
-  console.log('Request headers:', JSON.stringify(req.headers, null, 2)); // Log headers
-  console.log('Raw request body:', JSON.stringify(req.body, null, 2)); // Log raw body
-  if (!req.body || Object.keys(req.body).length === 0) {
-    console.error('No body received in request. Headers:', JSON.stringify(req.headers));
-    return res.status(400).json({ success: false, error: 'No data received' });
-  }
-
+// Initiate OTP for signup
+router.post('/initiate-otp', async (req, res) => {
+  console.log('Initiate OTP request:', JSON.stringify(req.body, null, 2));
   const { firstName, lastName, email, password, phoneNumber, username } = req.body;
-  console.log('Destructured data:', { firstName, lastName, email, password, phoneNumber, username });
 
   try {
     if (!firstName?.trim()) throw new Error('First name is required.');
@@ -57,15 +49,13 @@ router.post('/register', async (req, res) => {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
     if (!password) throw new Error('Password is required.');
     if (!validatePassword(password)) throw new Error('Password must have 6+ chars, a letter, a number, and a special char.');
+    if (phoneNumber && !/^\+\d{7,15}$/.test(phoneNumber)) throw new Error('Invalid phone number format.');
 
     const existingUser = await adminAuth.getUserByEmail(email).catch(err => {
       console.error('Firebase getUserByEmail error:', err);
       throw err;
     });
-    if (existingUser) {
-      console.log('Email already in use:', email);
-      return res.status(400).json({ success: false, error: 'Email already in use. Log in instead.' });
-    }
+    if (existingUser) throw new Error('Email already in use. Log in instead.');
 
     const otp = generateOTP();
     const otpDocRef = adminDb.collection('otps').doc(email);
@@ -73,6 +63,11 @@ router.post('/register', async (req, res) => {
       otp,
       expires: adminDb.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)),
       createdAt: adminDb.FieldValue.serverTimestamp(),
+      firstName,
+      lastName,
+      password,
+      phoneNumber,
+      username,
     }).catch(err => {
       console.error('Firestore set OTP error:', err);
       throw err;
@@ -82,16 +77,15 @@ router.post('/register', async (req, res) => {
     console.log('OTP sent successfully for email:', email);
     res.json({ success: true, message: 'OTP sent to your email.' });
   } catch (err) {
-    console.error('Registration endpoint error:', err.message || err);
-    res.status(400).json({ success: false, error: err.message || 'Registration failed' });
+    console.error('Initiate OTP error:', err.message || err);
+    res.status(400).json({ success: false, error: err.message || 'Failed to initiate OTP.' });
   }
 });
 
-// Resend OTP endpoint
+// Resend OTP
 router.post('/resend-otp', async (req, res) => {
-  console.log('Raw resend OTP request:', JSON.stringify(req.body, null, 2));
+  console.log('Resend OTP request:', JSON.stringify(req.body, null, 2));
   if (!req.body || !req.body.email) {
-    console.error('No email received in resend OTP request');
     return res.status(400).json({ success: false, error: 'Email is required' });
   }
 
@@ -100,14 +94,16 @@ router.post('/resend-otp', async (req, res) => {
   try {
     if (!validateEmail(email)) throw new Error('Invalid email format.');
 
+    const otpDoc = await adminDb.collection('otps').doc(email).get();
+    if (!otpDoc.exists) throw new Error('No pending registration for this email.');
+
     const otp = generateOTP();
-    const otpDocRef = adminDb.collection('otps').doc(email);
-    await otpDocRef.set({
+    await adminDb.collection('otps').doc(email).update({
       otp,
       expires: adminDb.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)),
       createdAt: adminDb.FieldValue.serverTimestamp(),
     }).catch(err => {
-      console.error('Firestore set OTP error:', err);
+      console.error('Firestore update OTP error:', err);
       throw err;
     });
 
@@ -120,24 +116,16 @@ router.post('/resend-otp', async (req, res) => {
   }
 });
 
-// Verify OTP and complete registration
+// Verify OTP and create user
 router.post('/verify-otp', async (req, res) => {
-  console.log('Raw verify OTP request:', JSON.stringify(req.body, null, 2));
+  console.log('Verify OTP request:', JSON.stringify(req.body, null, 2));
   if (!req.body || !req.body.email || !req.body.otp) {
-    console.error('Missing email or OTP in verify request');
     return res.status(400).json({ success: false, error: 'Email and OTP are required' });
   }
 
-  const { email, otp, firstName, lastName, password, phoneNumber, username } = req.body;
+  const { email, otp } = req.body;
 
   try {
-    if (!firstName?.trim()) throw new Error('First name is required.');
-    if (!lastName?.trim()) throw new Error('Last name is required.');
-    if (!validateEmail(email)) throw new Error('Invalid email format.');
-    if (!otp) throw new Error('OTP is required.');
-    if (!password) throw new Error('Password is required.');
-    if (!validatePassword(password)) throw new Error('Password must have 6+ chars, a letter, a number, and a special char.');
-
     const otpDoc = await adminDb.collection('otps').doc(email).get().catch(err => {
       console.error('Firestore get OTP error:', err);
       throw err;
@@ -147,6 +135,7 @@ router.post('/verify-otp', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
     }
 
+    const { firstName, lastName, password, phoneNumber, username } = otpDoc.data();
     const userRecord = await adminAuth.createUser({
       email,
       password,
@@ -160,24 +149,14 @@ router.post('/verify-otp', async (req, res) => {
       email,
       name: `${firstName} ${lastName}`,
       username,
-      address: '',
       phoneNumber: phoneNumber || '',
       createdAt: new Date().toISOString(),
       uid: userRecord.uid,
       profileImage: null,
+      role: 'Buyer', // Default role
     };
     await adminDb.collection('users').doc(userRecord.uid).set(userData).catch(err => {
       console.error('Firestore set user data error:', err);
-      throw err;
-    });
-
-    await adminDb.collection('notifications').add({
-      type: 'user_signup',
-      message: `New user signed up: ${email}`,
-      createdAt: adminDb.FieldValue.serverTimestamp(),
-      details: { user_id: userRecord.uid, email },
-    }).catch(err => {
-      console.error('Firestore add notification error:', err);
       throw err;
     });
 
@@ -191,7 +170,7 @@ router.post('/verify-otp', async (req, res) => {
     });
 
     console.log('User created successfully for email:', email);
-    res.json({ success: true, message: 'Account created successfully.' });
+    res.json({ success: true, message: 'Account created successfully. Check your email for verification.' });
   } catch (err) {
     console.error('Verify OTP error:', err.message || err);
     res.status(500).json({ success: false, error: err.message || 'Account creation failed.' });
