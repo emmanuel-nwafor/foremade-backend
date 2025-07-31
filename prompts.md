@@ -1,0 +1,4 @@
+Now unto a new problem.
+The signup is not secure bro, I want to make it more secure bro.
+1. The recent signup which is part of the codes I'll be sharing with you shortly, is frontend only, and i like it that way bro, let it be frontend only, I want the signup logic to be frontend just the way it is, but let us implement like an OTP, for security. Now when users signs up, don't create an endpoint register, let the registration just be frontend only like i said before, but when they signup, an email should be sent to their account telling them to verify the OTP. For example: A user signs up filling put all necessary fields first name, last name, email phone number and password, an OTP should be sent to the persons email the one they just field above for verification and security.
+2. In the login page, I'll share a file also named auth routes in the file i want modifications of role based system, in the auth routes.js 

@@ -80,41 +80,41 @@ const ADMIN_EMAILS = [
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/register', async (req, res) => {
-  const { email, firstName, lastName, phoneNumber, username, uid } = req.body;
+// router.post('/register', async (req, res) => {
+//   const { email, firstName, lastName, phoneNumber, username, uid } = req.body;
 
-  try {
-    if (!email || !firstName || !lastName || !username || !uid) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
+//   try {
+//     if (!email || !firstName || !lastName || !username || !uid) {
+//       return res.status(400).json({ error: 'Missing required fields' });
+//     }
 
-    const role = ADMIN_EMAILS.includes(email) ? 'Admin' : 'Buyer';
+//     const role = ADMIN_EMAILS.includes(email) ? 'Admin' : 'Buyer';
 
-    const userRef = doc(db, 'users', uid);
-    const userData = {
-      email,
-      name: `${firstName} ${lastName}`,
-      username,
-      phoneNumber: phoneNumber || '',
-      role,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await setDoc(userRef, userData, { merge: true });
+//     const userRef = doc(db, 'users', uid);
+//     const userData = {
+//       email,
+//       name: `${firstName} ${lastName}`,
+//       username,
+//       phoneNumber: phoneNumber || '',
+//       role,
+//       createdAt: new Date().toISOString(),
+//       updatedAt: new Date().toISOString(),
+//     };
+//     await setDoc(userRef, userData, { merge: true });
 
-    await addDoc(collection(db, 'notifications'), {
-      type: 'user_signup',
-      message: `New user signed up: ${email} as ${role}`,
-      createdAt: new Date(),
-      details: { user_id: uid, email, role },
-    });
+//     await addDoc(collection(db, 'notifications'), {
+//       type: 'user_signup',
+//       message: `New user signed up: ${email} as ${role}`,
+//       createdAt: new Date(),
+//       details: { user_id: uid, email, role },
+//     });
 
-    res.status(200).json({ message: 'User registered, redirecting to profile', role, redirectUrl: role === 'Admin' ? '/admin-dashboard' : '/profile' });
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed: ' + error.message });
-  }
-});
+//     res.status(200).json({ message: 'User registered, redirecting to profile', role, redirectUrl: role === 'Admin' ? '/admin-dashboard' : '/profile' });
+//   } catch (error) {
+//     console.error('Registration error:', error);
+//     res.status(500).json({ error: 'Registration failed: ' + error.message });
+//   }
+// });
 
 router.use('/admin/*all', async (req, res, next) => {
   try {
