@@ -24,6 +24,7 @@ const sendOTPEmail = async (email, otp) => {
 
   try {
     await transporter.sendMail(mailOptions);
+    console.log('Email sent successfully to:', email);
   } catch (err) {
     console.error('Email send error:', err);
     throw err;
@@ -46,21 +47,19 @@ router.post('/send-otp', async (req, res) => {
 
     const otp = generateOTP();
     const otpRef = doc(collection(db, 'otps'), email);
-    await setDoc(otpRef, {
+    const result = await setDoc(otpRef, {
       otp,
       expires: new Date(Date.now() + 10 * 60 * 1000), // Plain JavaScript Date
       createdAt: serverTimestamp(), // Client SDK serverTimestamp
-    }).catch(err => {
-      console.error('Firestore set OTP error:', err);
-      throw err;
     });
+    console.log('OTP document set:', { email, otp, expires: new Date(Date.now() + 10 * 60 * 1000) });
 
     await sendOTPEmail(email, otp);
     console.log('OTP sent successfully for email:', email);
     res.json({ success: true, message: 'OTP sent to your email.' });
   } catch (err) {
     console.error('Send OTP error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Failed to send OTP.' });
+    res.status(500).json({ success: false, error: err.message || 'Failed to send OTP. Please try again.' });
   }
 });
 
@@ -94,7 +93,7 @@ router.post('/resend-otp', async (req, res) => {
     res.json({ success: true, message: 'New OTP sent to your email.' });
   } catch (err) {
     console.error('Resend OTP error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Failed to resend OTP.' });
+    res.status(500).json({ success: false, error: err.message || 'Failed to resend OTP. Please try again.' });
   }
 });
 
@@ -109,7 +108,10 @@ router.post('/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
 
   try {
-    if (!validateEmail(email)) throw new Error('Invalid email format.');
+    if (!validateEmail(email)) {
+      console.log('Invalid email format:', email);
+      return res.status(400).json({ success: false, error: 'Invalid email format' });
+    }
 
     const otpDoc = await getDoc(doc(db, 'otps', email)).catch(err => {
       console.error('Firestore get OTP error:', err);
@@ -123,13 +125,15 @@ router.post('/verify-otp', async (req, res) => {
     }
 
     const otpData = otpDoc.data();
+    console.log('Comparing OTPs:', { stored: otpData.otp, provided: otp });
+
     if (otpData.otp !== otp) {
       console.log('OTP mismatch:', { stored: otpData.otp, provided: otp });
       return res.status(400).json({ success: false, error: 'Incorrect verification code. Please try again.' });
     }
 
     if (otpData.expires < new Date()) {
-      console.log('OTP expired:', otpData.expires);
+      console.log('OTP expired:', { storedExpires: otpData.expires, currentTime: new Date() });
       await deleteDoc(doc(db, 'otps', email)).catch(err => console.error('Failed to delete expired OTP:', err));
       return res.status(400).json({ success: false, error: 'Verification code has expired. Please request a new one.' });
     }
@@ -143,7 +147,7 @@ router.post('/verify-otp', async (req, res) => {
     res.json({ success: true, message: 'Email verified successfully.' });
   } catch (err) {
     console.error('Verify OTP error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Verification failed. Please try again.' });
+    res.status(500).json({ success: false, error: 'Verification failed due to a server issue. Please try again later.' });
   }
 });
 
@@ -167,7 +171,7 @@ router.post('/verify-otp-status', async (req, res) => {
     res.json({ success: true, message: 'Email verified.' });
   } catch (err) {
     console.error('Verify OTP status error:', err.message || err);
-    res.status(500).json({ success: false, error: err.message || 'Failed to check verification status.' });
+    res.status(500).json({ success: false, error: 'Failed to check verification status. Please try again later.' });
   }
 });
 
