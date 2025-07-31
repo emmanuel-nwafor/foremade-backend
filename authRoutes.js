@@ -5,7 +5,7 @@ const router = express.Router();
 
 const ADMIN_EMAILS = [
   'echinecherem729@gmail.com',
-  'emitexc.e.o1@gmail.com',
+  // 'emitexc.e.o1@gmail.com',
   'info@foremade.com',
   'support@foremade.com',
 ];
