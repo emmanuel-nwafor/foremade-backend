@@ -1,17 +1,10 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
 const { db } = require('./firebaseConfig');
-const { doc, getDoc, updateDoc, serverTimestamp, collection, getDocs } = require('firebase/firestore');
+const { doc, getDoc, updateDoc, serverTimestamp } = require('firebase/firestore');
 const router = express.Router();
 const emailService = require('./emailService');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// Remove redundant nodemailer transporter since emailService handles it
 
 /**
  * @swagger
@@ -122,7 +115,7 @@ router.post('/send-product-approved-email', async (req, res) => {
       return res.json({ status: 'success', message: 'Approval email already sent to seller' });
     }
 
-    await emailService.sendProductApprovedEmail({ productId, productName, sellerId, sellerEmail });
+    await emailService.sendProductApprovedEmail({ email, productId, productName, sellerId });
     console.log(`Approval email sent to ${email} for product ${productId}`);
 
     await updateDoc(productRef, {
@@ -255,7 +248,7 @@ router.post('/send-product-rejected-email', async (req, res) => {
       return res.json({ status: 'success', message: 'Rejection email already sent to seller' });
     }
 
-    await emailService.sendProductRejectedEmail({ productId, productName, sellerId, sellerEmail, reason });
+    await emailService.sendProductRejectedEmail({ email, productId, productName, sellerId, reason });
     console.log(`Rejection email sent to ${email} for product ${productId}`);
 
     await updateDoc(productRef, {
@@ -418,7 +411,7 @@ router.post('/send-order-confirmation', async (req, res) => {
       return res.json({ status: 'success', message: 'Order confirmation email already sent' });
     }
 
-    await emailService.sendOrderConfirmation({ orderId, email, items, total, currency });
+    await emailService.sendOrderConfirmationSimpleEmail({ email, orderNumber: orderId, items, total });
     console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
     res.json({ status: 'success', message: 'Order confirmation email sent' });
   } catch (error) {
@@ -481,8 +474,8 @@ router.post('/api/youth-empowerment', async (req, res) => {
     console.log('[YOUTH EMPOWERMENT] EMAIL_USER:', process.env.EMAIL_USER);
     console.log('[YOUTH EMPOWERMENT] EMAIL_PASS:', process.env.EMAIL_PASS ? 'SET' : 'NOT SET');
     console.log('[YOUTH EMPOWERMENT] Sending to:', 'yehub@foremade.com');
-    await emailService.sendYouthEmpowermentApplication(formData);
-    res.status(200).json({ message: 'Application sent successfully!' });
+    // Note: sendYouthEmpowermentApplication is not in emailService.js yet. Add it if needed.
+    res.status(500).json({ error: 'sendYouthEmpowermentApplication not implemented in emailService.js' });
   } catch (err) {
     console.error('[YOUTH EMPOWERMENT] Failed to send email:', {
       message: err.message,
@@ -627,7 +620,6 @@ router.post('/send-seller-order-notification', async (req, res) => {
       payload: JSON.stringify(req.body, null, 2),
     });
 
-    // Validate required fields
     if (!orderId || !sellerId || !items || !total || !currency || !shippingDetails) {
       console.warn('Missing required fields:', { orderId, sellerId, items, total, currency, shippingDetails });
       return res.status(400).json({ error: 'Missing required fields' });
@@ -649,7 +641,6 @@ router.post('/send-seller-order-notification', async (req, res) => {
       return res.status(400).json({ error: 'Invalid shipping details: missing name, address, city, postalCode, country, or phone' });
     }
 
-    // Validate item structure
     for (const item of items) {
       if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
         console.warn('Invalid item structure:', item);
@@ -657,7 +648,6 @@ router.post('/send-seller-order-notification', async (req, res) => {
       }
     }
 
-    // Fetch seller's email from Firestore
     const userDoc = await getDoc(doc(db, 'users', sellerId));
     if (!userDoc.exists()) {
       console.warn(`Seller ${sellerId} not found in Firestore`);
@@ -673,15 +663,8 @@ router.post('/send-seller-order-notification', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Send email using emailService (if implemented)
-    if (emailService && emailService.sendSellerOrderNotification) {
-      await emailService.sendSellerOrderNotification({ email, orderId, items, total, currency, shippingDetails });
-      console.log(`Seller order notification email sent to ${email} for order ${orderId}`);
-      res.json({ status: 'success', message: 'Seller order notification email sent' });
-    } else {
-      // Fallback: send a basic email if emailService is not implemented
-      res.json({ status: 'success', message: 'Seller order notification email logic not implemented' });
-    }
+    // Note: sendSellerOrderNotification is not in emailService.js yet. Add it if needed.
+    res.status(500).json({ error: 'sendSellerOrderNotification not implemented in emailService.js' });
   } catch (error) {
     console.error('Error sending seller order notification email:', {
       message: error.message,
@@ -818,7 +801,7 @@ router.post('/send-listing-rejected-generic', async (req, res) => {
       return res.status(400).json({ error: 'Valid email is required' });
     }
     const userName = name || '';
-    await emailService.sendListingRejectedGeneric({ email, name: userName });
+    await emailService.sendListingRejectedGenericEmail({ email, name: userName });
     res.json({ status: 'success', message: 'Listing rejection email sent' });
   } catch (error) {
     console.error('Error sending listing rejection email:', { message: error.message, stack: error.stack, payload: req.body });
@@ -962,7 +945,7 @@ router.post('/send-order-confirmation-simple', async (req, res) => {
       return res.status(400).json({ error: 'Valid email and orderNumber are required' });
     }
     const userName = name || 'there';
-    await emailService.sendOrderConfirmationSimple({ email, orderNumber, name: userName });
+    await emailService.sendOrderConfirmationSimpleEmail({ email, orderNumber, name: userName });
     res.json({ status: 'success', message: 'Order confirmation email sent' });
   } catch (error) {
     console.error('Error sending order confirmation email:', { message: error.message, stack: error.stack, payload: req.body });
@@ -1178,6 +1161,279 @@ router.post('/send-feedback-request-email', async (req, res) => {
   } catch (error) {
     console.error('Error sending feedback request email:', { message: error.message, stack: error.stack, payload: req.body });
     res.status(500).json({ error: 'Failed to send feedback request email', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /send-email-verification:
+ *   post:
+ *     summary: Send email verification email
+ *     description: Send an email to verify a user's email address
+ *     tags: [Email Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - verificationLink
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "user@example.com"
+ *               verificationLink:
+ *                 type: string
+ *                 description: Verification URL
+ *                 example: "https://foremade.com/verify?token=abc123"
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Verification email sent"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/send-email-verification', async (req, res) => {
+  try {
+    const { email, verificationLink } = req.body;
+    if (!email || !/\S+@\S+\.\S+/.test(email) || !verificationLink) {
+      return res.status(400).json({ error: 'Valid email and verificationLink are required' });
+    }
+    await emailService.sendEmailVerification({ email, verificationLink });
+    res.json({ status: 'success', message: 'Verification email sent' });
+  } catch (error) {
+    console.error('Error sending email verification:', { message: error.message, stack: error.stack, payload: req.body });
+    res.status(500).json({ error: 'Failed to send verification email', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /send-pro-seller-request-received:
+ *   post:
+ *     summary: Send pro seller request received email
+ *     description: Send an email confirming receipt of a pro seller application
+ *     tags: [Email Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "seller@example.com"
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Pro seller request received email sent"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/send-pro-seller-request-received', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      return res.status(400).json({ error: 'Valid email is required' });
+    }
+    await emailService.sendProSellerRequestReceived({ email });
+    res.json({ status: 'success', message: 'Pro seller request received email sent' });
+  } catch (error) {
+    console.error('Error sending pro seller request received email:', { message: error.message, stack: error.stack, payload: req.body });
+    res.status(500).json({ error: 'Failed to send pro seller request received email', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /send-product-bump-receipt:
+ *   post:
+ *     summary: Send product bump receipt email
+ *     description: Send an email with the product bump receipt details
+ *     tags: [Email Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - duration
+ *               - amount
+ *               - startTime
+ *               - endTime
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "seller@example.com"
+ *               duration:
+ *                 type: string
+ *                 description: Bump duration
+ *                 example: "7 Days"
+ *               amount:
+ *                 type: string
+ *                 description: Amount paid
+ *                 example: "₦3,500"
+ *               startTime:
+ *                 type: string
+ *                 description: Start time of bump
+ *                 example: "Thursday, 31 July 2025 at 10:03 PM"
+ *               endTime:
+ *                 type: string
+ *                 description: End time of bump
+ *                 example: "Thursday, 07 August 2025 at 10:03 PM"
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Product bump receipt email sent"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/send-product-bump-receipt', async (req, res) => {
+  try {
+    const { email, duration, amount, startTime, endTime } = req.body;
+    if (!email || !/\S+@\S+\.\S+/.test(email) || !duration || !amount || !startTime || !endTime) {
+      return res.status(400).json({ error: 'Valid email, duration, amount, startTime, and endTime are required' });
+    }
+    await emailService.sendProductBumpReceipt({ email, duration, amount, startTime, endTime });
+    res.json({ status: 'success', message: 'Product bump receipt email sent' });
+  } catch (error) {
+    console.error('Error sending product bump receipt email:', { message: error.message, stack: error.stack, payload: req.body });
+    res.status(500).json({ error: 'Failed to send product bump receipt email', details: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /send-membership-revoked-email:
+ *   post:
+ *     summary: Send membership revoked email
+ *     description: Send an email notifying a user of membership revocation
+ *     tags: [Email Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "user@example.com"
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Membership revoked email sent"
+ *       400:
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/send-membership-revoked-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      return res.status(400).json({ error: 'Valid email is required' });
+    }
+    await emailService.sendMembershipRevokedEmail({ email });
+    res.json({ status: 'success', message: 'Membership revoked email sent' });
+  } catch (error) {
+    console.error('Error sending membership revoked email:', { message: error.message, stack: error.stack, payload: req.body });
+    res.status(500).json({ error: 'Failed to send membership revoked email', details: error.message });
   }
 });
 
