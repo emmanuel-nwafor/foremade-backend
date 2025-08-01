@@ -688,6 +688,57 @@ async function sendProductApprovedEmail({ email, productName }) {
   await transporter.sendMail(mailOptions);
 }
 
+async function sendOTPEmail({ email, otp }) {
+  if (!email || !/\S+@\S+\.\S+/.test(email) || !otp) {
+    throw new Error('Valid email and OTP are required');
+  }
+  const mailOptions = {
+    from: `"FOREMADE" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
+    to: email,
+    subject: 'Your OTP for Login Verification',
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login Verification - FOREMADE</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #0F2940; }
+    .header { background-color: #0F2940; text-align: center; padding: 40px 20px; }
+    .header img { max-width: 180px; margin-bottom: 10px; }
+    .header h2 { color: #ffffff; font-size: 22px; margin-top: 10px; }
+    .content { max-width: 600px; margin: 0 auto; padding: 40px 25px; background-color: #ffffff; text-align: center; }
+    .content h1 { color: #D9782D; font-size: 24px; margin-bottom: 20px; }
+    .content p { font-size: 16px; line-height: 1.6; margin-bottom: 25px; }
+    .otp-code { font-weight: bold; color: #0F2940; font-size: 28px; }
+    .footer { background-color: #F4F4F4; padding: 30px 20px; text-align: center; font-size: 13px; color: #666666; }
+    .footer a { color: #0F2940; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
+    <h2>Login Verification</h2>
+  </div>
+  <div class="content">
+    <h1>Verify Your Identity</h1>
+    <p>Hi,</p>
+    <p>Your one-time password (OTP) for login verification is:</p>
+    <p class="otp-code">${otp}</p>
+    <p>This OTP expires in 10 minutes. Please do not share it with anyone.</p>
+    <p>If you didn’t request this, please contact us immediately.</p>
+    <p>Warm regards,<br><strong>The FOREMADE Team</strong></p>
+  </div>
+  <div class="footer">
+    <p>Need help? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a><br />You received this email because of a login attempt on <a href="https://foremade.com">foremade.com</a>.</p>
+    <p>© 2025 FOREMADE. All rights reserved.</p>
+  </div>
+</body>
+</html>`,
+  };
+  await transporter.sendMail(mailOptions);
+}
+
 module.exports = {
   sendShippingConfirmationEmail,
   sendRefundApprovedEmail,
@@ -701,4 +752,5 @@ module.exports = {
   sendProSellerRejectedEmail,
   sendProductRejectedEmail,
   sendProductApprovedEmail,
+  sendOTPEmail,
 };

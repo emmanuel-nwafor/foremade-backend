@@ -1,35 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const nodemailer = require('nodemailer');
-const { db } = require('./firebaseConfig'); // Use client SDK Firestore
-const { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp } = require('firebase/firestore'); // Client SDK imports
+const { db } = require('./firebaseConfig');
+const { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp } = require('firebase/firestore');
+const emailService = require('./emailService');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-const sendOTPEmail = async (email, otp) => {
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: 'Your OTP for Login Verification',
-    text: `Your OTP is ${otp}. It expires in 10 minutes. Do not share it with anyone.`,
-  };
-
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log('Email sent successfully to:', email);
-  } catch (err) {
-    console.error('Email send error:', err);
-    throw err;
-  }
-};
 
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -51,11 +26,11 @@ router.post('/send-otp', async (req, res) => {
     await setDoc(otpRef, {
       otp,
       expires,
-      createdAt: serverTimestamp(), // Client SDK serverTimestamp
+      createdAt: serverTimestamp(),
     });
     console.log('OTP document set:', { email, otp, expires: expires.toDate() });
 
-    await sendOTPEmail(email, otp);
+    await emailService.sendOTPEmail({ email, otp });
     console.log('OTP sent successfully for email:', email);
     res.json({ success: true, message: 'OTP sent to your email.' });
   } catch (err) {
@@ -84,13 +59,13 @@ router.post('/resend-otp', async (req, res) => {
     await updateDoc(doc(db, 'otps', email), {
       otp,
       expires,
-      createdAt: serverTimestamp(), // Client SDK serverTimestamp
+      createdAt: serverTimestamp(),
     }).catch(err => {
       console.error('Firestore update OTP error:', err);
       throw err;
     });
 
-    await sendOTPEmail(email, otp);
+    await emailService.sendOTPEmail({ email, otp });
     console.log('New OTP sent successfully for email:', email);
     res.json({ success: true, message: 'New OTP sent to your email.' });
   } catch (err) {
@@ -139,7 +114,6 @@ router.post('/verify-otp', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Incorrect verification code. Please try again.' });
     }
 
-    // Add a 30-second buffer to account for potential delays
     const currentTimeWithBuffer = new Date(Date.now() + 30 * 1000);
     if (otpData.expires.toDate() < currentTimeWithBuffer) {
       console.log('OTP expired with buffer:', {
