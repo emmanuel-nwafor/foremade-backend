@@ -21,7 +21,7 @@ const app = express();
 // Add JSON body parsing middleware
 app.use(express.json());
 
-// Setup other middleware (excluding authentication for specific routes)
+// Setup other middleware (authentication will be handled selectively)
 setupMiddleware(app);
 
 // Swagger configuration
@@ -98,9 +98,9 @@ app.use(recaptchaRoutes);
 app.use(uploadRoutes);
 app.use(proSellerRoutes);
 
-// Exclude authentication for suspend and delete routes
-app.use(suspendRoutes)
-app.use(deleteRoutes)
+// Mount suspend and delete routes without authentication middleware
+app.use(suspendRoutes);
+app.use(deleteRoutes);
 
 // Start server
 const PORT = process.env.PORT || 5000;

@@ -192,6 +192,14 @@ const setupMiddleware = (app) => {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(currencyMiddleware);
+
+  // Apply authentication middleware selectively
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/admin/suspend-user') || req.path.startsWith('/admin/delete-user')) {
+      return next(); // Skip authentication for these paths
+    }
+    authenticateFirebaseToken(req, res, next);
+  });
 };
 
 module.exports = { 
