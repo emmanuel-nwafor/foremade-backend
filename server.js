@@ -13,6 +13,8 @@ const uploadRoutes = require('./uploadRoutes');
 const proSellerRoutes = require('./proSellerRoutes');
 const authRoutes = require('./authRoutes');
 const otpRoutes = require('./otpRoutes');
+const suspendRoutes = require('/suspendRoutes')
+const deleteRoutes = require('/deleteRoutes')
 
 const app = express();
 
@@ -95,6 +97,8 @@ app.use(otpRoutes);
 app.use(recaptchaRoutes);
 app.use(uploadRoutes);
 app.use(proSellerRoutes);
+app.use(suspendRoutes)
+app.use(deleteRoutes)
 
 // Start server
 const PORT = process.env.PORT || 5000;
