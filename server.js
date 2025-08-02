@@ -13,15 +13,15 @@ const uploadRoutes = require('./uploadRoutes');
 const proSellerRoutes = require('./proSellerRoutes');
 const authRoutes = require('./authRoutes');
 const otpRoutes = require('./otpRoutes');
-const suspendRoutes = require('./suspendRoutes')
-const deleteRoutes = require('./deleteRoutes')
+const suspendRoutes = require('./suspendRoutes');
+const deleteRoutes = require('./deleteRoutes');
 
 const app = express();
 
 // Add JSON body parsing middleware
 app.use(express.json());
 
-// Setup other middleware
+// Setup other middleware (excluding authentication for specific routes)
 setupMiddleware(app);
 
 // Swagger configuration
@@ -97,6 +97,8 @@ app.use(otpRoutes);
 app.use(recaptchaRoutes);
 app.use(uploadRoutes);
 app.use(proSellerRoutes);
+
+// Exclude authentication for suspend and delete routes
 app.use(suspendRoutes)
 app.use(deleteRoutes)
 
