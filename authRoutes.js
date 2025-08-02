@@ -1,33 +1,10 @@
 const express = require('express');
 const { auth } = require('./firebaseConfig');
-const { doc, getDoc, setDoc, collection, getDocs } = require('firebase/firestore');
-const { createUserWithEmailAndPassword, updateProfile } = require('firebase/auth');
+const { doc, getDoc, setDoc, collection, getDocs, query, where } = require('firebase/firestore');
+const { createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword } = require('firebase/auth');
 const db = require('./firebaseConfig').db;
 const router = express.Router();
 const { authenticateFirebaseToken } = require('./middleware');
-
-let ADMIN_EMAILS = [
-  'echinecherem729@gmail.com',
-  'info@foremade.com',
-  'support@foremade.com',
-];
-
-// Update admin emails dynamically
-const updateAdminEmails = async () => {
-  try {
-    const adminsSnapshot = await getDocs(collection(db, 'users'));
-    ADMIN_EMAILS = adminsSnapshot.docs
-      .filter((doc) => doc.data().role === 'admin')
-      .map((doc) => doc.data().email);
-  } catch (error) {
-    console.error('Error updating admin emails:', error);
-  }
-};
-
-// Ensure ADMIN_EMAILS is initialized before routes
-(async () => {
-  await updateAdminEmails();
-})();
 
 // Admin middleware
 router.use('/admin/*all', authenticateFirebaseToken, async (req, res, next) => {
@@ -38,7 +15,7 @@ router.use('/admin/*all', authenticateFirebaseToken, async (req, res, next) => {
     }
     const userRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userRef);
-    if (!userSnap.exists() || !ADMIN_EMAILS.includes(userSnap.data().email)) {
+    if (!userSnap.exists()) {
       return res.status(403).json({ error: 'Admin access denied' });
     }
     next();
@@ -91,6 +68,13 @@ router.post('/admin/add-admin', async (req, res) => {
       profileImage: null,
     });
 
+    // Save to admins collection
+    await setDoc(doc(collection(db, 'admins'), newAdmin.uid), {
+      email,
+      uid: newAdmin.uid,
+      createdAt: new Date().toISOString(),
+    });
+
     res.status(201).json({ message: 'Admin added successfully', uid: newAdmin.uid });
   } catch (error) {
     console.error('Error adding admin:', error);
@@ -98,6 +82,53 @@ router.post('/admin/add-admin', async (req, res) => {
       return res.status(409).json({ error: 'Email already in use' });
     }
     res.status(500).json({ error: 'Failed to add admin: ' + error.message });
+  }
+});
+
+// Login endpoint with role-based redirection
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    const response = await fetch('https://foremade-backend.onrender.com/verify-otp-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: user.email }),
+    });
+    const otpData = await response.json();
+    if (!otpData.success) {
+      return res.status(400).json({ error: otpData.error || 'Please verify your email with the code sent to you.' });
+    }
+
+    const userDoc = doc(db, 'users', user.uid);
+    const userSnapshot = await getDoc(userDoc);
+    if (!userSnapshot.exists()) {
+      return res.status(404).json({ error: 'Account not found. Please contact support.' });
+    }
+
+    const userData = userSnapshot.data();
+    localStorage.setItem('userData', JSON.stringify(userData));
+
+    // Check if email exists in admins collection
+    const adminsRef = collection(db, 'admins');
+    const q = query(adminsRef, where('email', '==', email));
+    const adminSnapshot = await getDocs(q);
+    const isAdmin = !adminSnapshot.empty;
+
+    const redirectUrl = isAdmin ? '/admin/dashboard' : '/profile';
+    res.status(200).json({ message: 'Login successful', uid: user.uid, redirectUrl });
+  } catch (error) {
+    console.error('Error logging in:', error);
+    if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    res.status(500).json({ error: 'Login failed: ' + error.message });
   }
 });
 
