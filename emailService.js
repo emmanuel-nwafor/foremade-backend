@@ -409,53 +409,52 @@ async function sendProductBumpReceipt({ email, duration, amount, startTime, endT
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FOREMADE Marketplace - Product Bump Receipt</title>
-  <style>
-    body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #000000; }
-    .header { background-color: #000000; text-align: center; padding: 20px; }
-    .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
-    .content { max-width: 600px; margin: 0 auto; padding: 40px 20px; background-color: #ffffff; text-align: center; }
-    .content h2 { color: #000000; font-size: 20px; margin-bottom: 20px; }
-    .content p { font-size: 16px; line-height: 1.6; margin-bottom: 20px; }
-    .receipt { background-color: #f4f4f4; padding: 20px; border-radius: 5px; text-align: left; margin-bottom: 20px; }
-    .receipt p { margin: 5px 0; }
-    .benefits ul { list-style-type: none; padding: 0; text-align: left; }
-    .benefits li { font-size: 16px; margin-bottom: 10px; }
-    .button { display: inline-block; background-color: #000000; color: #ffffff; padding: 12px 24px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 16px; }
-    .footer { background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #666666; }
-    .footer a { color: #000000; text-decoration: none; margin: 0 10px; }
-  </style>
+  <title>Product Bump Receipt</title>
 </head>
-<body>
-  <div class="header">
-    <h1>FOREMADE MARKETPLACE</h1>
-  </div>
-  <div class="content">
-    <h2>🎉 Congratulations!</h2>
-    <p>Your product bump has been activated successfully and is now live on FOREMADE.</p>
-    <div class="receipt">
-      <h3>Receipt</h3>
-      <p>Bump Duration: ${duration}</p>
-      <p>Amount Paid: ${amount}</p>
-      <p>Start Time: ${startTime}</p>
-      <p>End Time: ${endTime}</p>
+<body style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f9f9f9;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; border: 1px solid #e0e0e0;">
+
+    <!-- Header -->
+    <div style="background-color: #001F3F; padding: 20px;">
+      <h1 style="margin: 0; color: white; font-size: 22px;">FOREMADE<br><span style="font-size: 14px; color: #cccccc;">MARKETPLACE</span></h1>
     </div>
-    <div class="benefits">
-      <h3>Benefits of Bumping</h3>
-      <ul>
+
+    <!-- Message -->
+    <div style="padding: 30px 20px;">
+      <h2 style="margin-top: 0; color: #28a745;">🎉 Congratulations!</h2>
+      <p style="color: #666;">Your product bump has been activated successfully and is now live on FOREMADE.</p>
+
+      <div style="background-color: #f0f8ff; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <p>Bump Duration: ${duration}</p>
+        <p>Amount Paid: ${amount}</p>
+        <p>Start Time: ${startTime}</p>
+        <p>End Time: ${endTime}</p>
+      </div>
+
+      <h3 style="color: #001F3F;">Benefits of Bumping</h3>
+      <ul style="color: #333; padding-left: 20px;">
         <li>Your product appears at the top of relevant search results</li>
         <li>Greater visibility on category and homepage listings</li>
         <li>Increased chances of making more sales</li>
       </ul>
+
+      <p style="color: #666;">Manage your product anytime via your seller dashboard:</p>
+
+      <!-- Dashboard Link -->
+      <div style="text-align: center; margin-top: 25px;">
+        <a href="https://www.foremade.com/seller/dashboard" style="background-color: #001F3F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">Go to Dashboard</a>
+      </div>
     </div>
-    <p>Manage your product anytime via your seller dashboard:</p>
-    <a href="https://foremade.com/dashboard" class="button">Go to Dashboard</a>
-  </div>
-  <div class="footer">
-    <p>FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="#">Terms</a> &nbsp;•&nbsp; <a href="#">Privacy</a></p>
+
+    <!-- Footer -->
+    <footer style="padding: 15px 20px; text-align: center; font-size: 12px; color: #999;">
+      FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="#" style="color: #999;">Terms</a> &nbsp;•&nbsp; <a href="#" style="color: #999;">Privacy</a>
+    </footer>
+
   </div>
 </body>
-</html>`,
+</html>
+`,
   };
   await transporter.sendMail(mailOptions);
 }

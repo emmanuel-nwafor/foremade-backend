@@ -1361,7 +1361,7 @@ router.post('/send-pro-seller-request-received', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/send-product-bump-receipt', async (req, res) => {
+router.post('/api/send-bump-email', async (req, res) => {
   try {
     const { email, duration, amount, startTime, endTime } = req.body;
     if (!email || !/\S+@\S+\.\S+/.test(email) || !duration || !amount || !startTime || !endTime) {
