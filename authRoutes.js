@@ -1,9 +1,10 @@
 const express = require('express');
-const { auth } = require('./firebaseConfig'); // Ensure auth is imported
+const { auth } = require('./firebaseConfig');
 const { doc, getDoc, setDoc, collection, getDocs } = require('firebase/firestore');
 const { createUserWithEmailAndPassword, updateProfile } = require('firebase/auth');
 const db = require('./firebaseConfig').db;
 const router = express.Router();
+const { authenticateFirebaseToken } = require('./middleware');
 
 let ADMIN_EMAILS = [
   'echinecherem729@gmail.com',
@@ -23,12 +24,15 @@ const updateAdminEmails = async () => {
   }
 };
 
-updateAdminEmails(); // Initial fetch
+// Ensure ADMIN_EMAILS is initialized before routes
+(async () => {
+  await updateAdminEmails();
+})();
 
 // Admin middleware
-router.use('/admin/*all', async (req, res, next) => {
+router.use('/admin/*all', authenticateFirebaseToken, async (req, res, next) => {
   try {
-    const userId = req.headers['x-user-id'];
+    const userId = req.user.uid;
     if (!userId) {
       return res.status(401).json({ error: 'User ID required' });
     }
@@ -44,9 +48,9 @@ router.use('/admin/*all', async (req, res, next) => {
 });
 
 // Seller middleware
-router.use('/seller/*all', async (req, res, next) => {
+router.use('/seller/*all', authenticateFirebaseToken, async (req, res, next) => {
   try {
-    const userId = req.headers['x-user-id'];
+    const userId = req.user.uid;
     if (!userId) {
       return res.status(401).json({ error: 'User ID required' });
     }
@@ -62,7 +66,7 @@ router.use('/seller/*all', async (req, res, next) => {
 });
 
 // Add new admin
-router.post('/admin/add-admin', async (req, res) => {
+router.post('/admin/add-admin', authenticateFirebaseToken, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
