@@ -1,6 +1,7 @@
 const cors = require('cors');
 const multer = require('multer');
 const express = require('express');
+const { adminAuth } = require('./firebaseConfig');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -72,6 +73,92 @@ const currencyMiddleware = (req, res, next) => {
   next();
 };
 
+// Firebase Authentication middleware
+const authenticateFirebaseToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ 
+        error: 'Authorization header required. Format: Bearer <firebase_id_token>' 
+      });
+    }
+
+    const idToken = authHeader.split('Bearer ')[1];
+    
+    if (!adminAuth) {
+      console.warn('Firebase Admin SDK not initialized. Skipping token verification.');
+      // For development, you can use a simple token format
+      if (idToken.startsWith('token_')) {
+        const userId = idToken.split('_')[2];
+        req.user = { uid: userId };
+        return next();
+      }
+      return res.status(401).json({ error: 'Firebase Admin SDK not configured' });
+    }
+
+    // Verify the Firebase ID token
+    const decodedToken = await adminAuth.verifyIdToken(idToken);
+    req.user = decodedToken;
+    
+    console.log(`Authenticated user: ${decodedToken.uid}`);
+    next();
+    
+  } catch (error) {
+    console.error('Firebase authentication error:', error);
+    
+    if (error.code === 'auth/id-token-expired') {
+      return res.status(401).json({ error: 'Token expired. Please login again.' });
+    }
+    
+    if (error.code === 'auth/id-token-revoked') {
+      return res.status(401).json({ error: 'Token revoked. Please login again.' });
+    }
+    
+    return res.status(401).json({ 
+      error: 'Invalid authentication token',
+      details: error.message 
+    });
+  }
+};
+
+// Optional authentication middleware (for routes that can work with or without auth)
+const optionalAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      // No token provided, continue without authentication
+      req.user = null;
+      return next();
+    }
+
+    const idToken = authHeader.split('Bearer ')[1];
+    
+    if (!adminAuth) {
+      // For development, handle simple token format
+      if (idToken.startsWith('token_')) {
+        const userId = idToken.split('_')[2];
+        req.user = { uid: userId };
+        return next();
+      }
+      req.user = null;
+      return next();
+    }
+
+    // Verify the Firebase ID token
+    const decodedToken = await adminAuth.verifyIdToken(idToken);
+    req.user = decodedToken;
+    next();
+    
+  } catch (error) {
+    console.warn('Optional authentication failed:', error.message);
+    // Continue without authentication
+    req.user = null;
+    next();
+  }
+};
+
 // Currency conversion utility
 const convertCurrency = (amount, fromCurrency, toCurrency) => {
   if (fromCurrency === toCurrency) return amount;
@@ -100,7 +187,7 @@ const setupMiddleware = (app) => {
   app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'x-user-currency', 'x-user-country', 'x-user-id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-currency', 'x-user-country', 'x-user-id'],
   }));
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true }));
@@ -111,6 +198,8 @@ module.exports = {
   upload, 
   setupMiddleware, 
   currencyMiddleware, 
+  authenticateFirebaseToken,
+  optionalAuth,
   convertCurrency, 
   formatCurrency,
   CURRENCY_CONFIG,

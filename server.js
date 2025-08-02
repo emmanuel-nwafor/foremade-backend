@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
-// const { setupMiddleware } = require('./middleware');
+const { setupMiddleware } = require('./middleware');
 const productRoutes = require('./productRoutes');
 const paymentRoutes = require('./paymentRoutes');
 const sellerRoutes = require('./sellerRoutes');
@@ -22,7 +22,7 @@ const app = express();
 app.use(express.json());
 
 // Setup other middleware (authentication will be handled selectively)
-// setupMiddleware(app);
+setupMiddleware(app);
 
 // Swagger configuration
 const swaggerOptions = {
