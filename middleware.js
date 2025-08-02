@@ -187,7 +187,7 @@ const setupMiddleware = (app) => {
   app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-currency', 'x-user-country'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-currency', 'x-user-country', 'x-user-id'],
   }));
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true }));
