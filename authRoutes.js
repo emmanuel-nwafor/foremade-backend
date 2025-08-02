@@ -66,7 +66,7 @@ router.use('/seller/*all', authenticateFirebaseToken, async (req, res, next) => 
 });
 
 // Add new admin
-router.post('/admin/add-admin', authenticateFirebaseToken, async (req, res) => {
+router.post('/admin/add-admin', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -91,7 +91,6 @@ router.post('/admin/add-admin', authenticateFirebaseToken, async (req, res) => {
       profileImage: null,
     });
 
-    await updateAdminEmails();
     res.status(201).json({ message: 'Admin added successfully', uid: newAdmin.uid });
   } catch (error) {
     console.error('Error adding admin:', error);
