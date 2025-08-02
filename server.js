@@ -13,8 +13,8 @@ const uploadRoutes = require('./uploadRoutes');
 const proSellerRoutes = require('./proSellerRoutes');
 const authRoutes = require('./authRoutes');
 const otpRoutes = require('./otpRoutes');
-const suspendRoutes = require('/suspendRoutes')
-const deleteRoutes = require('/deleteRoutes')
+const suspendRoutes = require('./suspendRoutes')
+const deleteRoutes = require('./deleteRoutes')
 
 const app = express();
 
