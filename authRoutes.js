@@ -3,10 +3,10 @@ const { db, auth } = require('./firebaseConfig');
 const { doc, getDoc, setDoc, collection, getDocs, query, where, updateDoc, deleteDoc, createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword } = require('firebase/firestore');
 const router = express.Router();
 
-// Admin middleware (queries DB directly)
+// Admin middleware (queries DB directly, uses userId from body or auth)
 router.use('/admin/*all', async (req, res, next) => {
   try {
-    const userId = req.body.userId;
+    const userId = req.body.userId || (req.user && req.user.uid); // Fallback to authenticated user if available
     if (!userId) {
       return res.status(401).json({ error: 'User ID required' });
     }
@@ -15,6 +15,7 @@ router.use('/admin/*all', async (req, res, next) => {
     if (!userSnap.exists() || userSnap.data().role !== 'admin') {
       return res.status(403).json({ error: 'Admin access denied' });
     }
+    req.adminUserId = userId; // Store for use in routes
     next();
   } catch (error) {
     res.status(500).json({ error: 'Server error: ' + error.message });
@@ -95,6 +96,9 @@ router.post('/admin/suspend-user/:userId', async (req, res) => {
 router.delete('/admin/delete-user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
 
     const userRef = doc(db, 'users', userId);
     await deleteDoc(userRef);
