@@ -1,12 +1,12 @@
 const express = require('express');
-const { db, auth } = require('./firebaseConfig');
-const { doc, getDoc, setDoc, collection, getDocs, query, where, updateDoc, deleteDoc, createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword } = require('firebase/firestore');
+const { db } = require('./firebaseConfig');
+const { doc, getDoc, setDoc, collection, getDocs, query, where } = require('firebase/firestore');
 const router = express.Router();
 
-// Admin middleware (queries DB directly, uses userId from body or auth)
+// Admin middleware (queries DB directly)
 router.use('/admin/*all', async (req, res, next) => {
   try {
-    const userId = req.body.userId || (req.user && req.user.uid); // Fallback to authenticated user if available
+    const userId = req.body.userId; // Assuming userId is sent in body, similar to sellersRoute.js
     if (!userId) {
       return res.status(401).json({ error: 'User ID required' });
     }
@@ -15,14 +15,31 @@ router.use('/admin/*all', async (req, res, next) => {
     if (!userSnap.exists() || userSnap.data().role !== 'admin') {
       return res.status(403).json({ error: 'Admin access denied' });
     }
-    req.adminUserId = userId; // Store for use in routes
     next();
   } catch (error) {
     res.status(500).json({ error: 'Server error: ' + error.message });
   }
 });
 
-// Add new admin
+// Seller middleware (queries DB directly)
+router.use('/seller/*all', async (req, res, next) => {
+  try {
+    const userId = req.body.userId; // Assuming userId is sent in body, similar to sellersRoute.js
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists() || !['seller', 'pro seller', 'admin'].includes(userSnap.data().role.toLowerCase())) {
+      return res.status(403).json({ error: 'Access denied: Seller, Pro Seller, or Admin role required' });
+    }
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Authorization failed: ' + error.message });
+  }
+});
+
+// Add new admin (using DB query approach)
 router.post('/admin/add-admin', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -30,6 +47,7 @@ router.post('/admin/add-admin', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    // Check if email already exists in users collection
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('email', '==', email));
     const userSnapshot = await getDocs(q);
@@ -37,12 +55,14 @@ router.post('/admin/add-admin', async (req, res) => {
       return res.status(409).json({ error: 'Email already in use' });
     }
 
+    // Create user in Firebase Auth (no ID token reliance)
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const newAdmin = userCredential.user;
 
     const username = email.split('@')[0];
     await updateProfile(newAdmin, { displayName: username });
 
+    // Save to users collection
     await setDoc(doc(db, 'users', newAdmin.uid), {
       email,
       name: username,
@@ -55,6 +75,7 @@ router.post('/admin/add-admin', async (req, res) => {
       profileImage: null,
     });
 
+    // Save to admins collection
     await setDoc(doc(collection(db, 'admins'), newAdmin.uid), {
       email,
       uid: newAdmin.uid,
@@ -71,45 +92,7 @@ router.post('/admin/add-admin', async (req, res) => {
   }
 });
 
-// Suspend or unsuspend user
-router.post('/admin/suspend-user/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { action } = req.body;
-    if (!['suspend', 'unsuspend'].includes(action)) {
-      return res.status(400).json({ error: 'Invalid action. Use "suspend" or "unsuspend"' });
-    }
-
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
-      status: action === 'suspend' ? 'suspended' : 'active',
-      updatedAt: new Date().toISOString(),
-    });
-    res.json({ message: `User ${action === 'suspend' ? 'suspended' : 'unsuspended'} successfully` });
-  } catch (error) {
-    console.error('Error suspending/unsuspending user:', error);
-    res.status(500).json({ error: 'Failed to update user status: ' + error.message });
-  }
-});
-
-// Delete user
-router.delete('/admin/delete-user/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    if (!userId) {
-      return res.status(400).json({ error: 'User ID is required' });
-    }
-
-    const userRef = doc(db, 'users', userId);
-    await deleteDoc(userRef);
-    res.json({ message: `User ${userId} deleted successfully` });
-  } catch (error) {
-    console.error('Error deleting user:', error);
-    res.status(500).json({ error: 'Failed to delete user: ' + error.message });
-  }
-});
-
-// Login endpoint
+// Login endpoint (queries DB directly for admin check)
 router.post('/authenticate', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -117,6 +100,7 @@ router.post('/authenticate', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    // Check if email exists in users collection
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('email', '==', email));
     const userSnapshot = await getDocs(q);
@@ -127,6 +111,7 @@ router.post('/authenticate', async (req, res) => {
     const userDoc = userSnapshot.docs[0];
     const userData = userDoc.data();
 
+    // Verify password with Firebase Auth (no ID token reliance)
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
@@ -134,10 +119,15 @@ router.post('/authenticate', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Check if email exists in admins collection
     const adminsRef = collection(db, 'admins');
     const adminQ = query(adminsRef, where('email', '==', email));
     const adminSnapshot = await getDocs(adminQ);
     const isAdmin = !adminSnapshot.empty;
+
+    // Store user data in local storage (simulated here for frontend)
+    // In a real app, this would be handled by the frontend
+    // localStorage.setItem('userData', JSON.stringify(userData));
 
     const redirectUrl = isAdmin ? '/admin/dashboard' : '/profile';
     res.status(200).json({ message: 'Authentication successful', uid: user.uid, redirectUrl });
