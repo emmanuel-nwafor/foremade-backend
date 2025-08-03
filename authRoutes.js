@@ -4,7 +4,7 @@ const { doc, getDoc, collection, getDocs, query, where, signInWithEmailAndPasswo
 const router = express.Router();
 
 // Login endpoint
-app.post('/authenticate', async (req, res) => {
+router.post('/authenticate', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
