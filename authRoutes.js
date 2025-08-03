@@ -1,7 +1,6 @@
 const express = require('express');
-const { db } = require('./firebaseConfig');
+const { db, auth } = require('./firebaseConfig');
 const { doc, getDoc, setDoc, collection, getDocs, query, where, updateDoc, deleteDoc, createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword } = require('firebase/firestore');
-const { auth } = require('./firebaseConfig');
 const router = express.Router();
 
 // Admin middleware (queries DB directly)

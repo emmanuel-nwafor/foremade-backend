@@ -1,6 +1,6 @@
 const { initializeApp } = require('firebase/app');
 const { getFirestore } = require('firebase/firestore');
-const admin = require('firebase-admin');
+const { getAuth } = require('firebase/auth'); // Added for auth
 
 // Client SDK config (for direct Firestore access)
 const firebaseConfig = {
@@ -14,8 +14,6 @@ const firebaseConfig = {
 
 const appFirebase = initializeApp(firebaseConfig);
 const db = getFirestore(appFirebase);
+const auth = getAuth(appFirebase); // Initialize auth
 
-const adminAuth = admin.auth(adminApp);
-const adminDb = admin.firestore(adminApp);
-
-module.exports = { db, adminAuth, adminDb, admin };
+module.exports = { db, auth };
