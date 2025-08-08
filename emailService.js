@@ -1,11 +1,20 @@
 const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT) || 456,
+  secure: false, // Changed to false for port 456; adjust if your SMTP requires TLS
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
   },
+  logger: true, // Enable logging for debugging
+  // debug: process.env.NODE_ENV !== 'production' // Debug only in non-production
+}).on('error', (error) => {
+  console.error('SMTP Transport Error:', error.message);
+  if (error.code === 'EAUTH') {
+    console.error('Authentication failed. Please check SMTP_PASS environment variable.');
+  }
 });
 
 async function sendShippingConfirmationEmail({ email, orderNumber, name }) {
@@ -409,47 +418,32 @@ async function sendProductBumpReceipt({ email, duration, amount, startTime, endT
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Product Bump Receipt</title>
+  <title>FOREMADE Membership Revoked</title>
 </head>
 <body style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f9f9f9;">
   <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; border: 1px solid #e0e0e0;">
 
-    <!-- Header -->
     <div style="background-color: #001F3F; padding: 20px;">
       <h1 style="margin: 0; color: white; font-size: 22px;">FOREMADE<br><span style="font-size: 14px; color: #cccccc;">MARKETPLACE</span></h1>
     </div>
 
-    <!-- Message -->
-    <div style="padding: 30px 20px;">
-      <h2 style="margin-top: 0; color: #28a745;">🎉 Congratulations!</h2>
-      <p style="color: #666;">Your product bump has been activated successfully and is now live on FOREMADE.</p>
-
-      <div style="background-color: #f0f8ff; padding: 20px; border-radius: 5px; margin: 20px 0;">
-        <p>Bump Duration: ${duration}</p>
-        <p>Amount Paid: ${amount}</p>
-        <p>Start Time: ${startTime}</p>
-        <p>End Time: ${endTime}</p>
-      </div>
-
-      <h3 style="color: #001F3F;">Benefits of Bumping</h3>
-      <ul style="color: #333; padding-left: 20px;">
-        <li>Your product appears at the top of relevant search results</li>
-        <li>Greater visibility on category and homepage listings</li>
-        <li>Increased chances of making more sales</li>
-      </ul>
-
-      <p style="color: #666;">Manage your product anytime via your seller dashboard:</p>
-
-      <!-- Dashboard Link -->
-      <div style="text-align: center; margin-top: 25px;">
-        <a href="https://www.foremade.com/seller/dashboard" style="background-color: #001F3F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">Go to Dashboard</a>
-      </div>
+    <div style="padding: 30px 20px 10px;">
+      <h2 style="margin-top: 0; color: #cc0000;">Membership Revoked</h2>
+      <p style="color: #666;">We regret to inform you that your FOREMADE Membership has been revoked.</p>
+      <p style="color: #666;">This may be due to a policy violation, non-compliance, or other membership-related issues. Your seller account may still operate under limited access if applicable.</p>
     </div>
 
-    <!-- Footer -->
-    <footer style="padding: 15px 20px; text-align: center; font-size: 12px; color: #999;">
+    <div style="padding: 20px;">
+      <p style="font-size: 14px; color: #333;">If you believe this was a mistake or would like to appeal the decision, please contact our support team for assistance.</p>
+    </div>
+
+    <div style="padding: 20px; text-align: center;">
+      <a href="mailto:support@foremade.com" style="background-color: #001F3F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">Contact Support</a>
+    </div>
+
+    <div style="padding: 15px 20px; text-align: center; font-size: 12px; color: #999;">
       FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="#" style="color: #999;">Terms</a> &nbsp;•&nbsp; <a href="#" style="color: #999;">Privacy</a>
-    </footer>
+    </div>
 
   </div>
 </body>
