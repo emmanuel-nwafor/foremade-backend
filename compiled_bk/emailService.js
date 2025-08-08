@@ -8,10 +8,8 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
   },
-  logger: true, 
-  tls: {
-    rejectUnauthorized: false, // Optional: Set to false if you encounter SSL issues (not recommended for production)
-  },
+  logger: true, // Enable logging for debugging
+  // debug: process.env.NODE_ENV !== 'production' // Debug only in non-production
 }).on('error', (error) => {
   console.error('SMTP Transport Error:', error.message);
   if (error.code === 'EAUTH') {
