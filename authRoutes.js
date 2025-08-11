@@ -1,3 +1,8 @@
+const express = require('express');
+const { db } = require('./firebaseConfig');
+const { collection, getDocs, query, where } = require('firebase/firestore');
+const router = express.Router();
+
 router.post('/authenticate', async (req, res) => {
   try {
     const { email } = req.body;
