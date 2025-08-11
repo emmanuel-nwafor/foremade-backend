@@ -3,7 +3,7 @@ const cors = require('cors');
 const router = express.Router();
 const { db } = require('./firebaseConfig');
 const { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp } = require('firebase/firestore');
-const emailService = require('./emailService');
+const emailService = require('./SMTP_CONFIG_EMAILING/emailService');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
