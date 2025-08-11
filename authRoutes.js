@@ -1,20 +1,3 @@
-const express = require('express');
-const cors = require('cors');
-const { db } = require('./firebaseConfig');
-const { collection, getDocs, query, where } = require('firebase/firestore');
-const router = express.Router();
-
-// Enable CORS for specific origins
-const corsOptions = {
-  origin: "*", // Add your deployed frontend URL here
-  methods: ['GET', 'POST', 'OPTIONS'], // Allow preflight requests
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
-
-router.use(cors(corsOptions));
-
-router.options('/authenticate', cors(corsOptions)); // Handle preflight requests
-
 router.post('/authenticate', async (req, res) => {
   try {
     const { email } = req.body;
@@ -25,15 +8,17 @@ router.post('/authenticate', async (req, res) => {
     const adminsRef = collection(db, 'admins');
     const adminQ = query(adminsRef, where('email', '==', email));
     const adminSnapshot = await getDocs(adminQ);
-    const isAdmin = !adminSnapshot.empty;
+    const isAdminRegistered = !adminSnapshot.empty;
 
-    // Define admin emails
     const adminEmails = ['Foremade@icloud.com', 'echinecherem729@gmail.com'];
     const role = adminEmails.includes(email) ? 'admin' : 'buyer';
     const redirectUrl = role === 'admin' ? '/admin/dashboard' : '/profile';
 
-    // Ensure the user exists in the admins collection if they are an admin
-    if (role === 'admin' && isAdmin) {
+    if (role === 'admin' && !isAdminRegistered) {
+      // Allow admin role if email is in adminEmails, even if not in Firestore
+      console.warn(`Admin ${email} not found in Firestore but allowed due to adminEmails list.`);
+      return res.status(200).json({ isAdmin: true, role, redirectUrl });
+    } else if (role === 'admin' && isAdminRegistered) {
       res.status(200).json({ isAdmin: true, role, redirectUrl });
     } else if (role === 'buyer') {
       res.status(200).json({ isAdmin: false, role, redirectUrl });
@@ -45,5 +30,3 @@ router.post('/authenticate', async (req, res) => {
     res.status(500).json({ error: 'Verification failed: ' + error.message });
   }
 });
-
-module.exports = router;
