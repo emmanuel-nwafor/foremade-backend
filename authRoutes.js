@@ -35,3 +35,5 @@ router.post('/authenticate', async (req, res) => {
     res.status(500).json({ error: 'Verification failed: ' + error.message });
   }
 });
+
+module.exports = router;
