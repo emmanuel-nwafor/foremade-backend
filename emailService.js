@@ -1,15 +1,19 @@
 const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
+  service: 'gmail', // Example: Use a specific service like 'gmail'. Adjust as needed.
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
   logger: true,
+  debug: true, // Enable debug output
 }).on('error', (error) => {
   console.error('Email Transport Error:', error.message);
   if (error.code === 'EAUTH') {
-    console.error('Authentication failed. Please check EMAIL_PASS environment variable.');
+    console.error('Authentication failed. Check EMAIL_USER and EMAIL_PASS environment variables.');
+  } else if (error.code === 'ECONNREFUSED') {
+    console.error('Connection refused. Check your email service settings or network.');
   }
 });
 
