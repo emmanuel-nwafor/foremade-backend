@@ -1,4 +1,5 @@
 const express = require('express');
+const cors = require('cors');
 const router = express.Router();
 const { db } = require('./firebaseConfig');
 const { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp } = require('firebase/firestore');
@@ -7,6 +8,20 @@ const emailService = require('./emailService');
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+// Enable CORS for specific origins
+const corsOptions = {
+  origin: "*", // Add your deployed frontend URL here
+  methods: ['GET', 'POST', 'OPTIONS'], // Allow preflight requests
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+router.use(cors(corsOptions));
+
+router.options('/send-otp', cors(corsOptions)); // Handle preflight requests
+router.options('/resend-otp', cors(corsOptions));
+router.options('/verify-otp', cors(corsOptions));
+router.options('/verify-otp-status', cors(corsOptions));
 
 // Send OTP before login
 router.post('/send-otp', async (req, res) => {

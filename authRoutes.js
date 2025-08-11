@@ -4,6 +4,17 @@ const { db } = require('./firebaseConfig');
 const { collection, getDocs, query, where } = require('firebase/firestore');
 const router = express.Router();
 
+// Enable CORS for specific origins
+const corsOptions = {
+  origin: ['http://localhost:5173', 'https://your-frontend-domain.com'], // Add your deployed frontend URL here
+  methods: ['GET', 'POST', 'OPTIONS'], // Allow preflight requests
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+router.use(cors(corsOptions));
+
+router.options('/authenticate', cors(corsOptions)); // Handle preflight requests
+
 router.post('/authenticate', async (req, res) => {
   try {
     const { email } = req.body;
