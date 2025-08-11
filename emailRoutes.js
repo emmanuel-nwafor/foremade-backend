@@ -1,6 +1,6 @@
 const express = require('express');
 const nodemailer = require('nodemailer');
-const { db } = require('../firebaseConfig');
+const { db } = require('./firebaseConfig');
 const { doc, getDoc, updateDoc, serverTimestamp } = require('firebase/firestore');
 const router = express.Router();
 

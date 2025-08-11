@@ -6,7 +6,7 @@ const router = express.Router();
 
 // Enable CORS for specific origins
 const corsOptions = {
-  origin: ['http://localhost:5173', 'https://your-frontend-domain.com'], // Add your deployed frontend URL here
+  origin: "*", // Add your deployed frontend URL here
   methods: ['GET', 'POST', 'OPTIONS'], // Allow preflight requests
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
