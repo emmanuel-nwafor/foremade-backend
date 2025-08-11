@@ -186,7 +186,7 @@ async function sendProSellerApprovedEmail({ email }) {
   const mailOptions = {
     from: `"FOREMADE" <${process.env.EMAIL_USER || 'no-reply@foremade.com'}>`,
     to: email,
-    subject: 'Congratulations! Your Pro Seller Request Approved - FOREMADE Marketplace',
+    subject: 'Congratulations! Your Pro Seller Request have been Approved - FOREMADE Marketplace',
     html: `<!DOCTYPE html>
 <html lang="en">
 <head>
