@@ -1,18 +1,50 @@
 const express = require('express');
+const admin = require('firebase-admin'); // Ensure Firebase Admin SDK is initialized in firebaseConfig.js
 const { db } = require('./firebaseConfig');
 const { collection, getDocs, query, where } = require('firebase/firestore');
 const router = express.Router();
 
 // Middleware to check authorization based on email header
 const requireAuth = (req, res, next) => {
-  const userEmail = req.headers['x-user-email']; // Custom header for email
+  const userEmail = req.headers['x-user-email'];
   if (!userEmail) {
     return res.status(401).json({ error: 'Unauthorized: No user email provided' });
   }
-
-  req.userEmail = userEmail; // Attach email to request for later use
+  req.userEmail = userEmail;
   next();
 };
+
+// Initialize admin accounts with passwords (run once, then comment out)
+const initializeAdminAccounts = async () => {
+  const adminEmails = ['Foremade@icloud.com', 'echinecherem729@gmail.com'];
+  const adminPasswords = {
+    'Foremade@icloud.com': 'Admin$ecure2025!F',
+    'echinecherem729@gmail.com': 'Adm1nP@ssw0rd!25',
+  };
+
+  for (const [email, password] of Object.entries(adminPasswords)) {
+    try {
+      const userRecord = await admin.auth().getUserByEmail(email);
+      console.log(`User ${email} already exists`);
+    } catch (error) {
+      if (error.code === 'auth/user-not-found') {
+        await admin.auth().createUser({
+          email,
+          password,
+          displayName: email.split('@')[0],
+        });
+        console.log(`Created admin user ${email} with password ${password}`);
+      }
+    }
+
+    // Add to admins collection in Firestore
+    const adminDoc = doc(db, 'admins', email);
+    await setDoc(adminDoc, { email, role: 'admin' }, { merge: true });
+  }
+};
+
+// Uncomment to initialize admins (run once)
+// initializeAdminAccounts().then(() => console.log('Admin accounts initialized'));
 
 // Authentication endpoint: checks if email is admin and returns role info
 router.post('/authenticate', async (req, res) => {
@@ -33,8 +65,8 @@ router.post('/authenticate', async (req, res) => {
     const redirectUrl = role === 'admin' ? '/admin/dashboard' : '/profile';
 
     if (role === 'admin' && !isAdminRegistered) {
-      // Warn but allow admins in adminEmails list even if not in Firestore
       console.warn(`Admin ${email} not found in Firestore but allowed due to adminEmails list.`);
+      await setDoc(doc(db, 'admins', email), { email, role: 'admin' });
       return res.status(200).json({ isAdmin: true, role, redirectUrl });
     }
 
@@ -69,7 +101,6 @@ router.get('/admin/dashboard', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: Access to admin dashboard denied' });
     }
 
-    // Return a success response (or render the dashboard if serving HTML)
     res.status(200).json({ message: 'Welcome to the admin dashboard', userEmail });
   } catch (error) {
     console.error('Admin dashboard access error:', error);
