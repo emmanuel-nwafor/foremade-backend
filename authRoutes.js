@@ -53,6 +53,37 @@ router.post('/authenticate', async (req, res) => {
   }
 });
 
+// New endpoint to check authentication and admin status
+router.post('/auth/check', async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized: No valid token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const userEmail = req.headers['x-user-email'];
+    if (!userEmail) {
+      return res.status(401).json({ error: 'Unauthorized: No user email provided' });
+    }
+
+    const adminsRef = collection(db, 'admins');
+    const adminQ = query(adminsRef, where('email', '==', userEmail));
+    const adminSnapshot = await getDocs(adminQ);
+    const isAdminRegistered = !adminSnapshot.empty;
+
+    const adminEmails = ['Foremade@icloud.com', 'echinecherem729@gmail.com'];
+    const isAdminEmail = adminEmails.includes(userEmail);
+    const isAdmin = isAdminEmail && isAdminRegistered;
+    const role = isAdmin ? 'admin' : 'buyer';
+
+    res.status(200).json({ isAdmin, role });
+  } catch (error) {
+    console.error('Auth check error:', error);
+    res.status(500).json({ error: 'Auth check failed: ' + error.message });
+  }
+});
+
 // Protected admin dashboard route
 router.get('/admin/dashboard', requireAuth, async (req, res) => {
   try {
