@@ -53,15 +53,10 @@ router.post('/authenticate', async (req, res) => {
   }
 });
 
-// New endpoint to check authentication and admin status
+// Updated endpoint to check authentication and admin status
 router.post('/auth/check', async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Unauthorized: No valid token provided' });
-    }
-
-    const token = authHeader.split(' ')[1];
+    console.log('Received headers:', req.headers); // Debug log
     const userEmail = req.headers['x-user-email'];
     if (!userEmail) {
       return res.status(401).json({ error: 'Unauthorized: No user email provided' });
