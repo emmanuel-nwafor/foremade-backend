@@ -2,7 +2,7 @@
 const express = require('express');
 const { db } = require('./firebaseConfig');
 const { collection, getDocs, query, where, doc, getDoc } = require('firebase/firestore');
-const { verifyAndCheckAdmin } = require('../middleware/verifyAndCheckAdmin');
+const { verifyAndCheckAdmin } = require('./verifyAndCheckAdmin');
 
 const router = express.Router();
 
