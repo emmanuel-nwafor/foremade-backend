@@ -1,74 +1,94 @@
+// routes/admin.js
 const express = require('express');
 const { db } = require('./firebaseConfig');
-const { collection, getDocs, query, where } = require('firebase/firestore');
+const { collection, getDocs, query, where, doc, getDoc } = require('firebase/firestore');
+const { verifyAndCheckAdmin } = require('../middleware/verifyAndCheckAdmin');
+
 const router = express.Router();
 
-// Middleware to check authorization based on email header
-const requireAuth = (req, res, next) => {
-  const userEmail = req.headers['x-user-email']; // Custom header for email
-  if (!userEmail) {
-    return res.status(401).json({ error: 'Unauthorized: No user email provided' });
-  }
-
-  req.userEmail = userEmail; // Attach email to request for later use
-  next();
-};
-
-// Authentication endpoint
+/**
+ * POST /authenticate
+ * - Expects Authorization: Bearer <idToken>
+ * - Verifies token, responds with role and redirectUrl
+ */
 router.post('/authenticate', async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
+    // We accept token in Authorization header
+    const authHeader = req.headers.authorization || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized: No token provided' });
+    }
+    // We'll reuse the verify logic from middleware
+    // Note: We don't call middleware here because we want to respond with role info
+    const idToken = authHeader.split('Bearer ')[1];
+    // verify token using the helper inside verifyAndCheckAdmin module
+    const { verifyIdToken } = require('./verifyAndCheckAdmin'); // not exported currently
+    // But simpler: call verifyAndCheckAdmin by building a small wrapper.
+
+    // Instead of re-importing internal helper, just call the middleware-like logic:
+    // Reuse the same code path by creating a temporary fake req/res/next or extract to helper.
+    // For clarity here, verify via the middleware function by calling it and catching req.user
+    // We'll implement a small inline verification to avoid circular imports:
+
+    // Inline verification (light): call firebase REST API directly
+    const fetch = global.fetch || require('node-fetch');
+    const verifyUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_API_KEY}`;
+
+    const verifyRes = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    });
+
+    const verifyData = await verifyRes.json();
+    if (!verifyData.users || !verifyData.users.length) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid token' });
     }
 
+    const firebaseUser = verifyData.users[0];
+    const uid = firebaseUser.localId;
+    const email = firebaseUser.email;
+
+    // check in admins collection
     const adminsRef = collection(db, 'admins');
-    const adminQ = query(adminsRef, where('email', '==', email));
-    const adminSnapshot = await getDocs(adminQ);
+    const byEmailQ = query(adminsRef, where('email', '==', email));
+    const adminSnapshot = await getDocs(byEmailQ);
     const isAdminRegistered = !adminSnapshot.empty;
 
     const adminEmails = ['Foremade@icloud.com', 'echinecherem729@gmail.com'];
-    const role = adminEmails.includes(email) ? 'admin' : 'buyer';
+    const isAdminEmail = adminEmails.includes((email || '').toLowerCase());
+    const role = isAdminEmail || isAdminRegistered ? 'admin' : 'buyer';
     const redirectUrl = role === 'admin' ? '/admin/dashboard' : '/profile';
 
-    if (role === 'admin' && !isAdminRegistered) {
-      // Allow admin role if email is in adminEmails, even if not in Firestore
-      console.warn(`Admin ${email} not found in Firestore but allowed due to adminEmails list.`);
-      return res.status(200).json({ isAdmin: true, role, redirectUrl });
-    } else if (role === 'admin' && isAdminRegistered) {
-      res.status(200).json({ isAdmin: true, role, redirectUrl });
-    } else if (role === 'buyer') {
-      res.status(200).json({ isAdmin: false, role, redirectUrl });
-    } else {
-      return res.status(403).json({ error: 'Unauthorized access. Admin not registered in the system.' });
-    }
-  } catch (error) {
-    console.error('Admin verification error:', error);
-    res.status(500).json({ error: 'Verification failed: ' + error.message });
+    return res.status(200).json({ isAdmin: role === 'admin', role, redirectUrl });
+  } catch (err) {
+    console.error('POST /authenticate error:', err);
+    return res.status(500).json({ error: 'Server error during authentication' });
   }
 });
 
-// Protected admin dashboard route
-router.get('/admin/dashboard', requireAuth, async (req, res) => {
+/**
+ * GET /admin/dashboard
+ * Protected route — uses verifyAndCheckAdmin middleware
+ */
+router.get('/admin/dashboard', verifyAndCheckAdmin, async (req, res) => {
   try {
-    const userEmail = req.userEmail;
-    const adminsRef = collection(db, 'admins');
-    const adminQ = query(adminsRef, where('email', '==', userEmail));
-    const adminSnapshot = await getDocs(adminQ);
-    const isAdminRegistered = !adminSnapshot.empty;
+    // req.user set by middleware
+    const { uid, email } = req.user;
 
-    const adminEmails = ['Foremade@icloud.com', 'echinecherem729@gmail.com'];
-    const isAdmin = adminEmails.includes(userEmail);
+    // Optionally fetch additional admin profile data from Firestore
+    const adminDocRef = doc(db, 'admins', uid);
+    const adminDoc = await getDoc(adminDocRef);
+    const adminProfile = adminDoc.exists() ? adminDoc.data() : null;
 
-    if (!isAdmin || !isAdminRegistered) {
-      return res.status(403).json({ error: 'Forbidden: Access to admin dashboard denied' });
-    }
-
-    // Return a success response (or render the dashboard if serving HTML)
-    res.status(200).json({ message: 'Welcome to the admin dashboard', userEmail });
-  } catch (error) {
-    console.error('Admin dashboard access error:', error);
-    res.status(500).json({ error: 'Internal server error: ' + error.message });
+    res.status(200).json({
+      message: 'Welcome to the admin dashboard',
+      user: { uid, email },
+      profile: adminProfile,
+    });
+  } catch (err) {
+    console.error('GET /admin/dashboard error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
