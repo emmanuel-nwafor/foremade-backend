@@ -13,7 +13,7 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-// Authentication endpoint (unchanged)
+// Authentication endpoint
 router.post('/authenticate', async (req, res) => {
   try {
     console.log('Received body:', req.body);
@@ -44,7 +44,7 @@ router.post('/authenticate', async (req, res) => {
   }
 });
 
-// Updated /auth/check endpoint with token and admin check
+// Updated /auth/check endpoint
 router.post('/auth/check', requireAuth, async (req, res) => {
   try {
     console.log('Received headers:', req.headers);
@@ -63,6 +63,7 @@ router.post('/auth/check', requireAuth, async (req, res) => {
     const isAdmin = isAdminEmail && isAdminRegistered;
     const role = isAdmin ? 'admin' : 'buyer';
 
+    console.log(`User ${userEmail} isAdmin: ${isAdmin}, role: ${role}`); // Debug log
     res.status(200).json({ isAdmin, role });
   } catch (error) {
     console.error('Auth check error:', error);
