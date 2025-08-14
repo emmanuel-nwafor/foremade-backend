@@ -18,9 +18,6 @@ const { sendSupportRequestEmail, sendProSellerApprovedEmail, sendProSellerReject
 
 const { WebApi } = require('smile-identity-core');
 
-const { getAuth } = require('firebase-admin/auth');
-
-
 /**
  * @swagger
  * /api/pro-seller:
@@ -1988,20 +1985,17 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
  *                     type: object
  */
 
-const authenticateFirebaseToken = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
-  }
-  const token = authHeader.split(' ')[1];
+router.get('/api/admin/all-pro-sellers', authenticateFirebaseToken, async (req, res) => {
   try {
-    // Since no firebase-admin, assume client SDK verifies token
-    const decodedToken = await getAuth().verifyIdToken(token); // Adjust based on your setup
-    req.user = { uid: decodedToken.uid, email: decodedToken.email };
-    next();
+    const proSellersSnap = await getDocs(collection(db, 'proSellers'));
+    const proSellers = proSellersSnap.docs.map(doc => doc.data());
+    const pending = proSellers.filter(ps => ps.status === 'pending');
+    const approved = proSellers.filter(ps => ps.status === 'approved');
+    const rejected = proSellers.filter(ps => ps.status === 'rejected');
+    res.json({ status: 'success', proSellers, pending, approved, rejected });
   } catch (error) {
-    return res.status(401).json({ error: 'Invalid token', details: error.message });
+    res.status(500).json({ error: 'Failed to fetch pro sellers', details: error.message });
   }
-};
+});
 
 module.exports = router;
