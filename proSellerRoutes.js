@@ -190,8 +190,11 @@ const { WebApi } = require('smile-identity-core');
 
 router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
   try {
-    // Simulate uid from token for testing
-    const { uid } = req.body.user || { uid: 'test-uid' }; // Use a dummy UID if no token
+    // Use UID from authenticated user instead of test-uid
+    const { uid } = req.user;
+    if (!uid) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
 
     // Accept all possible frontend fields
     const {
