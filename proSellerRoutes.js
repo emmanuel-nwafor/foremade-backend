@@ -1985,7 +1985,7 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
  *                     type: object
  */
 
-router.get('/api/admin/all-pro-sellers', authenticateFirebaseToken, async (req, res) => {
+router.get('/api/admin/all-pro-sellers', (req, res, next) => next(), async (req, res) => { // No auth
   try {
     const proSellersSnap = await getDocs(collection(db, 'proSellers'));
     const proSellers = proSellersSnap.docs.map(doc => doc.data());
