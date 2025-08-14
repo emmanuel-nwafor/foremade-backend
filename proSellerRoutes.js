@@ -188,10 +188,9 @@ const { WebApi } = require('smile-identity-core');
  *               $ref: '#/components/schemas/Error'
  */
 
-router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
+router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
   try {
-    // Simulate uid from token for testing
-    const { uid } = req.body.user || { uid: 'test-uid' }; // Use a dummy UID if no token
+    const { uid } = req.user; // Firebase user ID
 
     // Accept all possible frontend fields
     const {
@@ -227,11 +226,220 @@ router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
       });
     }
 
-    // ... (keep existing verification logic, but skip API calls for now)
-    // Temporarily auto-verify all verifications
-    // Remove or comment out API calls (e.g., Smile, Paystack, Stripe) for testing
+    // --- VERIFICATION LOGIC ---
+    // 1. Verify business registration number
+    if (regNumber && country) {
+      // TEMPORARY: Auto-verify all reg numbers for all countries
+      // (Remove/comment out all API calls)
+      // if (country === 'Nigeria' || country === 'NG') { ... }
+      // else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+      // try {
+      // const response = await axios.get(
+      // `https://api.company-information.service.gov.uk/company/${regNumber}`,
+      // { auth: { username: process.env.COMPANIES_HOUSE_API_KEY, password: '' } }
+      // );
+      // if (!response.data || response.data.error) {
+      // return res.status(400).json({ error: 'Invalid or unverified business registration number (UK)' });
+      // }
+      // } catch (err) {
+      // return res.status(400).json({ error: 'Failed to verify business registration number (UK)', details: err.response?.data || err.message });
+      // }
+      // }
+      // Instead, always treat as verified
+    }
+
+    // 2. Verify tax reference number
+    if (taxRef && country) {
+      // TEMPORARY: Auto-verify all TINs/VATs for all countries
+      // (Remove/comment out all API calls)
+      // if (country === 'Nigeria' || country === 'NG') { ... }
+      // else if (country === 'United Kingdom' || country === 'UK' || country === 'GB') {
+      // try {
+      // const vatNumber = taxRef.replace(/\s+/g, '');
+      // // Use VIES SOAP API for UK VAT verification
+      // const vatValid = await new Promise((resolve, reject) => {
+      // const url = 'http://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl';
+      // soap.createClient(url, (err, client) => {
+      // if (err) {
+      // return reject(err);
+      // }
+      // client.checkVat({
+      // countryCode: 'GB',
+      // vatNumber: vatNumber
+      // }, (err, result) => {
+      // if (err) {
+      // return reject(err);
+      // }
+      // resolve(result && result.valid === true);
+      // });
+      // });
+      // });
+      // if (!vatValid) {
+      // return res.status(400).json({ error: 'Invalid or unverified VAT number (UK)' });
+      // }
+      // } catch (err) {
+      // return res.status(400).json({ error: 'Failed to verify VAT number (UK)', details: err.message });
+      // }
+      // }
+      // Instead, always treat as verified
+    }
+
+    // 3. Verify bank account
+    if (accountNumber && country && country !== 'Nigeria' && country !== 'NG') {
+      // For non-Nigerian, use Stripe onboarding (like /onboard)
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required for onboarding non-Nigerian sellers' });
+      }
+      try {
+        const account = await stripe.accounts.create({
+          type: 'express',
+          country: country === 'United Kingdom' || country === 'UK' || country === 'GB' ? 'GB' : country,
+          email,
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+        });
+        const accountLink = await stripe.accountLinks.create({
+          account: account.id,
+          refresh_url: `${process.env.DOMAIN}/pro-seller-onboarding?status=failed`,
+          return_url: `${process.env.DOMAIN}/pro-seller-onboarding?status=success`,
+          type: 'account_onboarding',
+        });
+        // Store Stripe account ID in proSeller and seller docs after creation below
+        req.stripeAccountId = account.id;
+        req.stripeAccountLink = accountLink.url;
+      } catch (err) {
+        return res.status(500).json({ error: 'Failed to create Stripe onboarding', details: err.message });
+      }
+    }
+    // --- END VERIFICATION LOGIC ---
+
+    // Map categories from productLines if not provided
+    const finalCategories = Array.isArray(categories) && categories.length > 0
+      ? categories
+      : (Array.isArray(productLines) ? productLines : []);
+
+    // Build extended description with extra fields
+    const extraDescription = [
+      description,
+      regNumber ? `Reg Number: ${regNumber}` : '',
+      taxRef ? `Tax Ref: ${taxRef}` : '',
+      country ? `Country: ${country}` : '',
+      email ? `Email: ${email}` : '',
+      manager ? `Manager: ${manager}` : '',
+      managerEmail ? `Manager Email: ${managerEmail}` : '',
+      managerPhone ? `Manager Phone: ${managerPhone}` : '',
+      accountName ? `Account Name: ${accountName}` : '',
+      accountNumber ? `Account Number: ${accountNumber}` : '',
+      bankName ? `Bank Name: ${bankName}` : '',
+      phoneCode ? `Phone Code: ${phoneCode}` : '',
+      agree !== undefined ? `Agreed to terms: ${agree}` : ''
+    ].filter(Boolean).join(', ');
+
+    // Check if user already exists
+    const userRef = doc(db, 'users', uid);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      return res.status(404).json({ error: 'User not found. Please sync your account first.' });
+    }
+
+    // Check if user is already a pro seller
+    const proSellerQuery = query(collection(db, 'proSellers'), where('userId', '==', uid));
+    const proSellerSnap = await getDocs(proSellerQuery);
+    if (!proSellerSnap.empty) {
+      return res.status(409).json({ error: 'User is already registered as a pro seller' });
+    }
+
+    // 🧪 Skip real verifications if in test mode
+    if (!testMode && country === 'NG') {
+      const smile = new WebApi(
+        process.env.SMILE_PARTNER_ID,
+        process.env.SMILE_API_KEY,
+        '',
+        process.env.SMILE_ENV || 'sandbox'
+      );
+
+      // ✅ Verify CAC / Reg Number
+      if (regNumber) {
+        try {
+          const regRes = await smile.submit_job({
+            user_id: `uid_${uid}`,
+            job_id: `kyb_${Date.now()}`,
+            job_type: 13,
+            id_type: 'CAC',
+            id_number: regNumber,
+            country: 'NG',
+            optional_info: {
+              business_name: businessName,
+              full_name: manager || businessName
+            },
+            return_job_status: true
+          });
+          console.log('Smile CAC verification response:', regRes);
+          if (!regRes || regRes.ResultText !== 'ID Number Valid') {
+            return res.status(400).json({
+              error: 'Invalid or unverified CAC number (Smile)',
+              details: regRes?.ResultText || 'Verification failed'
+            });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Smile CAC verification failed', details: err.message });
+        }
+      }
+
+      // ✅ Verify TIN
+      if (taxRef) {
+        try {
+          const tinRes = await smile.submit_job({
+            user_id: `uid_${uid}`,
+            job_id: `tin_${Date.now()}`,
+            job_type: 5,
+            id_type: 'TIN',
+            id_number: taxRef,
+            country: 'NG',
+            optional_info: {
+              full_name: manager || businessName
+            },
+            return_job_status: true
+          });
+          console.log('Smile TIN verification response:', tinRes);
+          if (!tinRes || tinRes.ResultText !== 'ID Number Valid') {
+            return res.status(400).json({
+              error: 'Invalid or unverified TIN (Smile)',
+              details: tinRes?.ResultText || 'Verification failed'
+            });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Smile TIN verification failed', details: err.message });
+        }
+      }
+
+      // ✅ Verify bank account (via Paystack)
+      if (accountNumber && bankCode) {
+        try {
+          const response = await axios.get(
+            `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          if (!response.data.status) {
+            return res.status(400).json({ error: 'Invalid or unverified bank account (Nigeria)', message: response.data.message });
+          }
+        } catch (err) {
+          return res.status(400).json({ error: 'Failed to verify bank account (Nigeria)', details: err.response?.data?.message || err.message });
+        }
+      }
+    }
 
     const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const extraFields = { ...rest };
+
+    // Store any extra fields in a dedicated object
     const proSellerData = {
       proSellerId,
       userId: uid,
@@ -241,8 +449,8 @@ router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
       phoneCode: phoneCode || '',
       address,
       website: website || '',
-      description: [description, regNumber ? `Reg Number: ${regNumber}` : '', taxRef ? `Tax Ref: ${taxRef}` : '', country ? `Country: ${country}` : '', email ? `Email: ${email}` : '', manager ? `Manager: ${manager}` : '', managerEmail ? `Manager Email: ${managerEmail}` : '', managerPhone ? `Manager Phone: ${managerPhone}` : '', accountName ? `Account Name: ${accountName}` : '', accountNumber ? `Account Number: ${accountNumber}` : '', bankName ? `Bank Name: ${bankName}` : '', phoneCode ? `Phone Code: ${phoneCode}` : '', agree !== undefined ? `Agreed to terms: ${agree}` : ''].filter(Boolean).join(', '),
-      categories: Array.isArray(categories) && categories.length > 0 ? categories : (Array.isArray(productLines) ? productLines : []),
+      description: extraDescription,
+      categories: finalCategories,
       regNumber: regNumber || '',
       taxRef: taxRef || '',
       country: country || '',
@@ -256,22 +464,87 @@ router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
       agree: agree !== undefined ? agree : false,
       status: 'pending',
       isActive: true,
-      features: { analytics: true, productBumping: true, bulkUpload: true, prioritySupport: true },
-      extraFields: { ...rest },
+      features: {
+        analytics: true,
+        productBumping: true,
+        bulkUpload: true,
+        prioritySupport: true
+      },
+      extraFields, // Store any extra fields from frontend
       createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
     };
 
     await setDoc(doc(db, 'proSellers', proSellerId), proSellerData);
+
+    // Create seller document (for regular seller functionality)
+    const sellerRef = doc(db, 'sellers', uid);
+    await setDoc(sellerRef, {
+      userId: uid,
+      businessName,
+      businessType,
+      phone,
+      phoneCode: phoneCode || '',
+      address,
+      website: website || '',
+      description: extraDescription,
+      categories: finalCategories,
+      regNumber: regNumber || '',
+      taxRef: taxRef || '',
+      country: country || '',
+      email: email || '',
+      manager: manager || '',
+      managerEmail: managerEmail || '',
+      managerPhone: managerPhone || '',
+      accountName: accountName || '',
+      accountNumber: accountNumber || '',
+      bankName: bankName || '',
+      agree: agree !== undefined ? agree : false,
+      isProSeller: true,
+      proSellerId,
+      status: 'pending',
+      extraFields, // Store any extra fields from frontend
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    // Create wallet for the seller
+    const walletRef = doc(db, 'wallets', uid);
+    await setDoc(walletRef, {
+      userId: uid,
+      availableBalance: 0,
+      pendingBalance: 0,
+      totalEarnings: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    // Update user to mark as pro seller
+    await updateDoc(userRef, {
+      isProSeller: true,
+      proSellerId,
+      isSeller: true,
+      sellerId: uid,
+      updatedAt: serverTimestamp()
+    });
+
+    // After successful pro seller registration, create approval request
     await setDoc(doc(db, 'proSellerApprovals', proSellerId), {
       proSellerId,
       userId: uid,
       status: 'pending',
       createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
     });
 
-    console.log(`✅ Pro seller registered (test mode): ${proSellerId}`);
+    // If Stripe onboarding was created, update docs and return onboarding link
+    if (req.stripeAccountId && req.stripeAccountLink) {
+      await updateDoc(doc(db, 'proSellers', proSellerId), { stripeAccountId: req.stripeAccountId });
+      await updateDoc(doc(db, 'sellers', uid), { stripeAccountId: req.stripeAccountId });
+      return res.status(201).json({ status: 'success', proSellerId, stripeAccountId: req.stripeAccountId, redirectUrl: req.stripeAccountLink });
+    }
+
+    console.log(`✅ Pro seller registered: ${proSellerId}`);
     return res.status(201).json({ status: 'success', proSellerId });
   } catch (error) {
     console.error('❌ Pro seller registration failed:', error);
