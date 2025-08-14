@@ -191,7 +191,7 @@ const { WebApi } = require('smile-identity-core');
 router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
   try {
     // Use UID from authenticated user instead of test-uid
-    const { uid } = req.user || req.body.user; // Fallback to test-uid only if no auth
+    const { uid } = req.user || req.body.user || { uid: 'test-uid' }; // Fallback to test-uid only if no auth
 
     // Accept all possible frontend fields
     const {
