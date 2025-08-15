@@ -225,6 +225,134 @@ router.post('/api/pro-seller', async (req, res) => {
 
 /**
  * @swagger
+ * /api/pro-seller/verify-business:
+ *   post:
+ *     summary: Verify business registration number and tax reference
+ *     description: Verifies the business registration number and tax reference using an external API
+ *     tags: [Pro-Seller]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - regNumber
+ *               - country
+ *             properties:
+ *               regNumber:
+ *                 type: string
+ *                 description: Business registration number
+ *                 example: "1234567"
+ *               taxRef:
+ *                 type: string
+ *                 description: Tax reference number (optional)
+ *                 example: "12345678"
+ *               country:
+ *                 type: string
+ *                 enum: [Nigeria, NG, United Kingdom, UK, GB]
+ *                 description: Business country
+ *                 example: "Nigeria"
+ *     responses:
+ *       200:
+ *         description: Verification successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Verification successful"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     regValid:
+ *                       type: boolean
+ *                     taxValid:
+ *                       type: boolean
+ *       400:
+ *         description: Invalid request or verification failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/api/pro-seller/verify-business', async (req, res) => {
+  try {
+    const { regNumber, taxRef, country } = req.body;
+    if (!regNumber || !country) {
+      return res.status(400).json({ error: 'regNumber and country are required' });
+    }
+
+    const apiKey = process.env.LOOKUPTAX_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'API key not configured' });
+    }
+
+    const baseUrl = 'https://api.lookuptax.com/v1/validate';
+    const countryCode = country === 'United Kingdom' || country === 'UK' || country === 'GB' ? 'GB' : 'NG';
+
+    // Verify registration number
+    const regResponse = await axios.post(
+      baseUrl,
+      {
+        countryCode,
+        taxId: regNumber,
+      },
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }
+    );
+    const regValid = regResponse.data.is_valid || false;
+
+    // Verify tax reference if provided
+    let taxValid = true;
+    if (taxRef) {
+      const taxResponse = await axios.post(
+        baseUrl,
+        {
+          countryCode,
+          taxId: taxRef,
+        },
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }
+      );
+      taxValid = taxResponse.data.is_valid || false;
+    }
+
+    if (!regValid) {
+      return res.status(400).json({ error: 'Business registration number not valid' });
+    }
+    if (taxRef && !taxValid) {
+      return res.status(400).json({ error: 'Tax reference not valid' });
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Verification successful',
+      data: { regValid, taxValid },
+    });
+  } catch (error) {
+    console.error('Verification error:', error.response?.data || error.message);
+    const regError = error.response?.data?.message || 'Business registration number not valid';
+    const taxError = taxRef ? (error.response?.data?.message || 'Tax reference not valid') : '';
+    return res.status(400).json({ error: regError, details: { taxError } });
+  }
+});
+
+/**
+ * @swagger
  * /api/pro-seller/onboard:
  *   post:
  *     summary: Onboard pro seller for payments
