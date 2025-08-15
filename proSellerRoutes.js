@@ -190,10 +190,11 @@ const { WebApi } = require('smile-identity-core');
 
 router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
   try {
-    // Use UID from authenticated user instead of test-uid
-    const { uid } = req.user || req.body.user || { uid: 'test-uid' }; // Fallback to test-uid only if no auth
+    if (!req.user || !req.user.uid) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const { uid } = req.user;
 
-    // Accept all possible frontend fields
     const {
       businessName,
       businessType = 'Company',
@@ -220,16 +221,11 @@ router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
       ...rest
     } = req.body;
 
-    // Validate required fields
     if (!businessName || !businessType || !phone || !address) {
       return res.status(400).json({
         error: 'Missing required fields: businessName, businessType, phone, address'
       });
     }
-
-    // ... (keep existing verification logic, but skip API calls for now)
-    // Temporarily auto-verify all verifications
-    // Remove or comment out API calls (e.g., Smile, Paystack, Stripe) for testing
 
     const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const proSellerData = {
@@ -271,7 +267,7 @@ router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
       updatedAt: serverTimestamp(),
     });
 
-    console.log(`✅ Pro seller registered (test mode): ${proSellerId}`);
+    console.log(`✅ Pro seller registered: ${proSellerId}`);
     return res.status(201).json({ status: 'success', proSellerId });
   } catch (error) {
     console.error('❌ Pro seller registration failed:', error);
