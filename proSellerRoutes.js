@@ -1,21 +1,13 @@
 const express = require('express');
-
 const { db } = require('./firebaseConfig');
-
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-
 const axios = require('axios');
-
-const { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, addDoc } = require('firebase/firestore');
-
+const { 
+  doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, addDoc } = require('firebase/firestore');
 const { authenticateFirebaseToken } = require('./middleware');
-
 const soap = require('soap');
-
 const router = express.Router();
-
 const { sendSupportRequestEmail, sendProSellerApprovedEmail, sendProSellerRejectedEmail } = require('./emailService');
-
 const { WebApi } = require('smile-identity-core');
 
 /**
@@ -296,13 +288,15 @@ router.post('/api/pro-seller/verify-business', async (req, res) => {
 
     const apiKey = process.env.LOOKUPTAX_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'API key not configured' });
+      console.error('LOOKUPTAX_API_KEY is not set in environment variables');
+      return res.status(500).json({ error: 'Server configuration error' });
     }
 
     const baseUrl = 'https://api.lookuptax.com/v1/validate';
     const countryCode = country === 'United Kingdom' || country === 'UK' || country === 'GB' ? 'GB' : 'NG';
 
     // Verify registration number
+    console.log(`Verifying regNumber: ${regNumber} for country: ${countryCode}`);
     const regResponse = await axios.post(
       baseUrl,
       {
@@ -311,13 +305,16 @@ router.post('/api/pro-seller/verify-business', async (req, res) => {
       },
       {
         headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 10000, // 10-second timeout
       }
     );
     const regValid = regResponse.data.is_valid || false;
+    console.log('Reg number verification response:', regResponse.data);
 
     // Verify tax reference if provided
     let taxValid = true;
     if (taxRef) {
+      console.log(`Verifying taxRef: ${taxRef} for country: ${countryCode}`);
       const taxResponse = await axios.post(
         baseUrl,
         {
@@ -326,9 +323,11 @@ router.post('/api/pro-seller/verify-business', async (req, res) => {
         },
         {
           headers: { Authorization: `Bearer ${apiKey}` },
+          timeout: 10000,
         }
       );
       taxValid = taxResponse.data.is_valid || false;
+      console.log('Tax reference verification response:', taxResponse.data);
     }
 
     if (!regValid) {
@@ -344,7 +343,12 @@ router.post('/api/pro-seller/verify-business', async (req, res) => {
       data: { regValid, taxValid },
     });
   } catch (error) {
-    console.error('Verification error:', error.response?.data || error.message);
+    console.error('Verification error:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      stack: error.stack,
+    });
     const regError = error.response?.data?.message || 'Business registration number not valid';
     const taxError = taxRef ? (error.response?.data?.message || 'Tax reference not valid') : '';
     return res.status(400).json({ error: regError, details: { taxError } });
