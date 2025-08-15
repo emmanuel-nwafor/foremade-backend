@@ -190,88 +190,23 @@ const { WebApi } = require('smile-identity-core');
 
 router.post('/api/pro-seller', async (req, res) => {
   try {
-    let uid;
-    let idToken = req.headers.authorization?.split(' ')[1]; // Extract token if present
-
-    // Handle authenticated user
-    if (req.user && req.user.uid) {
-      uid = req.user.uid;
-    } else {
-      // Handle unauthenticated or signup case
-      if (idToken) {
-        // Validate token if provided (e.g., from signup)
-        const decodedToken = await admin.auth().verifyIdToken(idToken);
-        uid = decodedToken.uid;
-      } else {
-        // Guest submission with temporary UID
-        uid = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      }
-    }
-
-    const {
-      businessName,
-      businessType = 'Company',
-      phone,
-      phoneCode,
-      address,
-      website,
-      description,
-      categories,
-      productLines,
-      regNumber,
-      taxRef,
-      country,
-      bankCode,
-      email,
-      manager,
-      managerEmail,
-      managerPhone,
-      accountName,
-      accountNumber,
-      bankName,
-      agree,
-      testMode,
-      ...rest
-    } = req.body;
-
-    if (!businessName || !businessType || !phone || !address) {
-      return res.status(400).json({
-        error: 'Missing required fields: businessName, businessType, phone, address'
-      });
+    const { uid, ...proSellerData } = req.body;
+    if (!uid) {
+      return res.status(400).json({ error: 'UID is required' });
     }
 
     const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const proSellerData = {
+    const proSellerDataWithUid = {
       proSellerId,
       userId: uid,
-      businessName,
-      businessType,
-      phone,
-      phoneCode: phoneCode || '',
-      address,
-      website: website || '',
-      description: [description, regNumber ? `Reg Number: ${regNumber}` : '', taxRef ? `Tax Ref: ${taxRef}` : '', country ? `Country: ${country}` : '', email ? `Email: ${email}` : '', manager ? `Manager: ${manager}` : '', managerEmail ? `Manager Email: ${managerEmail}` : '', managerPhone ? `Manager Phone: ${managerPhone}` : '', accountName ? `Account Name: ${accountName}` : '', accountNumber ? `Account Number: ${accountNumber}` : '', bankName ? `Bank Name: ${bankName}` : '', phoneCode ? `Phone Code: ${phoneCode}` : '', agree !== undefined ? `Agreed to terms: ${agree}` : ''].filter(Boolean).join(', '),
-      categories: Array.isArray(categories) && categories.length > 0 ? categories : (Array.isArray(productLines) ? productLines : []),
-      regNumber: regNumber || '',
-      taxRef: taxRef || '',
-      country: country || '',
-      email: email || '',
-      manager: manager || '',
-      managerEmail: managerEmail || '',
-      managerPhone: managerPhone || '',
-      accountName: accountName || '',
-      accountNumber: accountNumber || '',
-      bankName: bankName || '',
-      agree: agree !== undefined ? agree : false,
+      ...proSellerData,
       status: 'pending',
       isActive: true,
-      features: { analytics: true, productBumping: true, bulkUpload: true, prioritySupport: true },
-      extraFields: { ...rest },
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
 
-    await setDoc(doc(db, 'proSellers', proSellerId), proSellerData);
+    await setDoc(doc(db, 'proSellers', proSellerId), proSellerDataWithUid);
     await setDoc(doc(db, 'proSellerApprovals', proSellerId), {
       proSellerId,
       userId: uid,
@@ -1594,7 +1529,7 @@ router.get('/api/admin/pro-seller-approvals', authenticateFirebaseToken, async (
  *         description: Admin access required
  */
 
-router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (req, res) => {
+router.post('/api/admin/approve-pro-seller', async (req, res) => { // Removed authenticateFirebaseToken
   try {
     const { proSellerId, approve } = req.body;
 
@@ -1613,17 +1548,16 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
 
     // Rate limiting: only send email if not already sent
     if (approvalData.emailSent) {
-      // Update status fields but skip email
       await updateDoc(approvalRef, {
         status: approve ? 'approved' : 'rejected',
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
       const proSellerRef = doc(db, 'proSellers', proSellerId);
       const proSellerSnap = await getDoc(proSellerRef);
       if (proSellerSnap.exists()) {
         await updateDoc(proSellerRef, {
           status: approve ? 'approved' : 'rejected',
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
         });
       }
       const userRef = doc(db, 'users', approvalData.userId);
@@ -1631,13 +1565,13 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
         await updateDoc(userRef, {
           isProSeller: true,
           role: 'proseller',
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
         });
       } else {
         await updateDoc(userRef, {
           isProSeller: false,
           role: 'buyer',
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
         });
       }
       return res.json({ status: 'success', message: 'Email already sent previously. Status updated.' });
@@ -1647,7 +1581,7 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
     await updateDoc(approvalRef, {
       status: approve ? 'approved' : 'rejected',
       updatedAt: serverTimestamp(),
-      emailSent: true
+      emailSent: true,
     });
 
     // Update proSeller and user status
@@ -1656,7 +1590,7 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
     if (proSellerSnap.exists()) {
       await updateDoc(proSellerRef, {
         status: approve ? 'approved' : 'rejected',
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
     }
 
@@ -1674,7 +1608,7 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
       await updateDoc(userRef, {
         isProSeller: true,
         role: 'proseller',
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
       if (userEmail) {
         await sendProSellerApprovedEmail({ email: userEmail, name: userName });
@@ -1683,7 +1617,7 @@ router.post('/api/admin/approve-pro-seller', authenticateFirebaseToken, async (r
       await updateDoc(userRef, {
         isProSeller: false,
         role: 'buyer',
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
       if (userEmail) {
         await sendProSellerRejectedEmail({ email: userEmail, name: userName });
