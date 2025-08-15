@@ -188,77 +188,25 @@ const { WebApi } = require('smile-identity-core');
  *               $ref: '#/components/schemas/Error'
  */
 
-router.post('/api/pro-seller', (req, res, next) => next(), async (req, res) => {
+router.post('/api/pro-seller', async (req, res) => {
   try {
-    if (!req.user || !req.user.uid) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    const { uid } = req.user;
-
-    const {
-      businessName,
-      businessType = 'Company',
-      phone,
-      phoneCode,
-      address,
-      website,
-      description,
-      categories,
-      productLines,
-      regNumber,
-      taxRef,
-      country,
-      bankCode,
-      email,
-      manager,
-      managerEmail,
-      managerPhone,
-      accountName,
-      accountNumber,
-      bankName,
-      agree,
-      testMode,
-      ...rest
-    } = req.body;
-
-    if (!businessName || !businessType || !phone || !address) {
-      return res.status(400).json({
-        error: 'Missing required fields: businessName, businessType, phone, address'
-      });
+    const { uid, ...proSellerData } = req.body;
+    if (!uid) {
+      return res.status(400).json({ error: 'UID is required' });
     }
 
     const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const proSellerData = {
+    const proSellerDataWithUid = {
       proSellerId,
       userId: uid,
-      businessName,
-      businessType,
-      phone,
-      phoneCode: phoneCode || '',
-      address,
-      website: website || '',
-      description: [description, regNumber ? `Reg Number: ${regNumber}` : '', taxRef ? `Tax Ref: ${taxRef}` : '', country ? `Country: ${country}` : '', email ? `Email: ${email}` : '', manager ? `Manager: ${manager}` : '', managerEmail ? `Manager Email: ${managerEmail}` : '', managerPhone ? `Manager Phone: ${managerPhone}` : '', accountName ? `Account Name: ${accountName}` : '', accountNumber ? `Account Number: ${accountNumber}` : '', bankName ? `Bank Name: ${bankName}` : '', phoneCode ? `Phone Code: ${phoneCode}` : '', agree !== undefined ? `Agreed to terms: ${agree}` : ''].filter(Boolean).join(', '),
-      categories: Array.isArray(categories) && categories.length > 0 ? categories : (Array.isArray(productLines) ? productLines : []),
-      regNumber: regNumber || '',
-      taxRef: taxRef || '',
-      country: country || '',
-      email: email || '',
-      manager: manager || '',
-      managerEmail: managerEmail || '',
-      managerPhone: managerPhone || '',
-      accountName: accountName || '',
-      accountNumber: accountNumber || '',
-      bankName: bankName || '',
-      agree: agree !== undefined ? agree : false,
+      ...proSellerData,
       status: 'pending',
       isActive: true,
-      features: { analytics: true, productBumping: true, bulkUpload: true, prioritySupport: true },
-      extraFields: { ...rest },
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
 
-    await setDoc(doc(db, 'proSellers', proSellerId), proSellerData);
+    await setDoc(doc(db, 'proSellers', proSellerId), proSellerDataWithUid);
     await setDoc(doc(db, 'proSellerApprovals', proSellerId), {
       proSellerId,
       userId: uid,
