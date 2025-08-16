@@ -218,6 +218,13 @@ router.post('/initiate-seller-payout', async (req, res) => {
       accountNumber: accountDetails?.accountNumber || seller.accountNumber || 'N/A',
     });
 
+    // Move amount from availableBalance to pendingBalance
+    await updateDoc(walletRef, {
+      availableBalance: increment(-amount),
+      pendingBalance: increment(amount),
+      updatedAt: serverTimestamp(),
+    });
+
     await addDoc(collection(db, 'notifications'), {
       type: 'payout_request',
       message: `New payout request of ₦${amount.toFixed(2)} from seller ${sellerId}`,
@@ -271,8 +278,8 @@ router.post('/approve-payout', async (req, res) => {
       return res.status(404).json({ error: 'Seller wallet not found', details: { sellerId } });
     }
     const walletData = walletSnap.data();
-    if (walletData.availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient available balance for payout', details: { availableBalance: walletData.availableBalance, amount } });
+    if ((walletData.pendingBalance || 0) < amount) {
+      return res.status(400).json({ error: 'Insufficient pending balance for payout', details: { pendingBalance: walletData.pendingBalance || 0, amount } });
     }
 
     if (country === 'Nigeria') {
@@ -313,7 +320,7 @@ router.post('/approve-payout', async (req, res) => {
 
       if (response.data.status && ['success', 'pending'].includes(response.data.data.status)) {
         await updateDoc(walletRef, {
-          availableBalance: increment(-amount),
+          pendingBalance: increment(-amount),
           updatedAt: serverTimestamp(),
         });
         await updateDoc(transactionRef, {
@@ -336,10 +343,37 @@ router.post('/approve-payout', async (req, res) => {
         throw new Error(response.data.message || 'Transfer initiation failed');
       }
     } else if (country === 'United Kingdom') {
-      const stripeAccountId = sellerData.stripeAccountId;
+      let stripeAccountId = sellerData.stripeAccountId;
       if (!stripeAccountId) {
-        return res.status(400).json({ error: 'Seller has not completed Stripe onboarding', details: { sellerId, stripeAccountId } });
+        if (!sellerData.email) {
+          return res.status(400).json({ error: 'Missing email for UK onboarding', details: { sellerId } });
+        }
+        const account = await stripe.accounts.create({
+          type: 'express',
+          country: 'GB',
+          email: sellerData.email,
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+        });
+        const accountLink = await stripe.accountLinks.create({
+          account: account.id,
+          refresh_url: `${process.env.DOMAIN}/seller-onboarding?status=failed`,
+          return_url: `${process.env.DOMAIN}/seller-onboarding?status=success`,
+          type: 'account_onboarding',
+        });
+        await updateDoc(sellerRef, {
+          stripeAccountId: account.id,
+          updatedAt: new Date().toISOString(),
+        });
+        return res.json({
+          status: 'redirect',
+          redirectUrl: accountLink.url,
+          message: 'Seller requires Stripe onboarding',
+        });
       }
+
       const transfer = await stripe.transfers.create({
         amount: Math.round(amount * 100),
         currency: 'gbp',
@@ -347,7 +381,7 @@ router.post('/approve-payout', async (req, res) => {
         transfer_group: transactionId,
       });
       await updateDoc(walletRef, {
-        availableBalance: increment(-amount),
+        pendingBalance: increment(-amount),
         updatedAt: serverTimestamp(),
       });
       await updateDoc(transactionRef, {
@@ -524,7 +558,7 @@ router.post('/delete-transaction', async (req, res) => {
       return res.status(404).json({ error: 'Transaction not found', details: { transactionId } });
     }
 
-    await deleteDoc(transactionRef); // Updated to deleteDoc
+    await deleteDoc(transactionRef);
     console.log('Transaction deleted:', transactionId);
     res.status(200).json({ message: 'Transaction deleted successfully' });
   } catch (error) {
