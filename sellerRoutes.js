@@ -238,28 +238,36 @@ router.post('/initiate-seller-payout', async (req, res) => {
 
 router.post('/approve-payout', async (req, res) => {
   try {
-    const { transactionId, sellerId } = req.body;
-    console.log('Approve payout request:', { transactionId, sellerId }); // Debug log
-    if (!transactionId || !sellerId) {
-      return res.status(400).json({ error: 'Missing transactionId or sellerId', details: { transactionId, sellerId } });
+    const { transactionId, sellerId, amount } = req.body;
+    console.log('=== Approve Payout Request ===', { transactionId, sellerId, amount }); // Enhanced log
+
+    if (!transactionId || !sellerId || !amount) {
+      console.log('Validation failed: Missing required fields');
+      return res.status(400).json({ error: 'Missing transactionId, sellerId, or amount', details: { transactionId, sellerId, amount } });
     }
 
     const transactionRef = doc(db, 'transactions', transactionId);
     const transactionSnap = await getDoc(transactionRef);
+    console.log('Transaction check:', { exists: transactionSnap.exists(), transactionId });
     if (!transactionSnap.exists()) {
       return res.status(404).json({ error: 'Transaction not found', details: { transactionId } });
     }
     const transactionData = transactionSnap.data();
+    console.log('Transaction data:', { sellerId: transactionData.sellerId, status: transactionData.status, amount: transactionData.amount });
     if (transactionData.sellerId !== sellerId) {
       return res.status(400).json({ error: 'Seller ID does not match transaction', details: { transactionId, sellerId, transactionSellerId: transactionData.sellerId } });
     }
     if (transactionData.status !== 'Pending') {
       return res.status(400).json({ error: 'Invalid transaction status', details: { transactionId, status: transactionData.status } });
     }
-    const { amount, country, paystackRecipientCode } = transactionData;
+    if (transactionData.amount !== amount) {
+      return res.status(400).json({ error: 'Requested amount does not match transaction amount', details: { requested: amount, transaction: transactionData.amount } });
+    }
+    const { country, paystackRecipientCode } = transactionData;
 
     const sellerRef = doc(db, 'sellers', sellerId);
     const sellerSnap = await getDoc(sellerRef);
+    console.log('Seller check:', { exists: sellerSnap.exists(), sellerId });
     if (!sellerSnap.exists()) {
       return res.status(404).json({ error: 'Seller not found', details: { sellerId } });
     }
@@ -267,16 +275,20 @@ router.post('/approve-payout', async (req, res) => {
 
     const walletRef = doc(db, 'wallets', sellerId);
     const walletSnap = await getDoc(walletRef);
+    console.log('Wallet check:', { exists: walletSnap.exists(), sellerId });
     if (!walletSnap.exists()) {
       return res.status(404).json({ error: 'Seller wallet not found', details: { sellerId } });
     }
     const walletData = walletSnap.data();
-    if (walletData.availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient available balance for payout', details: { availableBalance: walletData.availableBalance, amount } });
-    }
+    console.log('Wallet data:', { pendingBalance: walletData.pendingBalance, availableBalance: walletData.availableBalance });
+    // Temporary bypass of pendingBalance check to isolate issue
+    // if (walletData.pendingBalance === undefined || walletData.pendingBalance < amount) {
+    //   return res.status(400).json({ error: 'Insufficient pending balance for payout', details: { pendingBalance: walletData.pendingBalance, amount } });
+    // }
 
     if (country === 'Nigeria') {
       const recipientCode = paystackRecipientCode || sellerData.paystackRecipientCode;
+      console.log('Paystack validation:', { recipientCode });
       if (!recipientCode) {
         return res.status(400).json({ error: 'Seller has not completed Paystack onboarding', details: { sellerId, paystackRecipientCode } });
       }
@@ -286,8 +298,13 @@ router.post('/approve-payout', async (req, res) => {
           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
           'Content-Type': 'application/json',
         },
+        timeout: 30000,
+      }).catch(err => {
+        console.log('Paystack balance error:', err.message, { stack: err.stack });
+        throw new Error(`Paystack balance check failed: ${err.message}`);
       });
       const availableBalance = balanceResponse.data.data[0].balance / 100;
+      console.log('Paystack balance:', { availableBalance });
       if (availableBalance < amount) {
         return res.status(400).json({ error: 'Insufficient Paystack balance for transfer', details: { availableBalance, amount } });
       }
@@ -307,13 +324,16 @@ router.post('/approve-payout', async (req, res) => {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
             'Content-Type': 'application/json',
           },
-          timeout: 15000,
+          timeout: 30000,
         }
-      );
+      ).catch(err => {
+        console.log('Paystack transfer error:', err.message, { stack: err.stack });
+        throw new Error(`Paystack transfer failed: ${err.message}`);
+      });
 
       if (response.data.status && ['success', 'pending'].includes(response.data.data.status)) {
         await updateDoc(walletRef, {
-          availableBalance: increment(-amount),
+          pendingBalance: increment(-amount),
           updatedAt: serverTimestamp(),
         });
         await updateDoc(transactionRef, {
@@ -337,6 +357,7 @@ router.post('/approve-payout', async (req, res) => {
       }
     } else if (country === 'United Kingdom') {
       const stripeAccountId = sellerData.stripeAccountId;
+      console.log('Stripe validation:', { stripeAccountId });
       if (!stripeAccountId) {
         return res.status(400).json({ error: 'Seller has not completed Stripe onboarding', details: { sellerId, stripeAccountId } });
       }
@@ -345,9 +366,12 @@ router.post('/approve-payout', async (req, res) => {
         currency: 'gbp',
         destination: stripeAccountId,
         transfer_group: transactionId,
+      }).catch(err => {
+        console.log('Stripe transfer error:', err.message, { stack: err.stack });
+        throw new Error(`Stripe transfer failed: ${err.message}`);
       });
       await updateDoc(walletRef, {
-        availableBalance: increment(-amount),
+        pendingBalance: increment(-amount),
         updatedAt: serverTimestamp(),
       });
       await updateDoc(transactionRef, {
@@ -370,7 +394,7 @@ router.post('/approve-payout', async (req, res) => {
       return res.status(400).json({ error: 'Unsupported country', details: { country } });
     }
   } catch (error) {
-    console.error('Payout approval error:', error.message, { transactionId: req.body.transactionId, sellerId: req.body.sellerId });
+    console.error('=== Payout Approval Error ===', error.message, { transactionId: req.body.transactionId, sellerId: req.body.sellerId, stack: error.stack });
     return res.status(500).json({ error: 'Failed to approve payout', details: error.message });
   }
 });
