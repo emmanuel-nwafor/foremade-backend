@@ -167,7 +167,7 @@ router.post('/approve-payout', async (req, res) => {
 
     const country = transaction.country;
     if (!seller.paystackRecipientCode && country === 'Nigeria') {
-      const onboardingResponse = await axios.post('http://localhost:5000/api/onboard-seller', {
+      const onboardingResponse = await axios.post('https://foremade-backend.onrender.com/onboard-seller', {
         userId: sellerId,
         bankCode: transaction.bankCode,
         accountNumber: transaction.accountNumber,
@@ -175,7 +175,7 @@ router.post('/approve-payout', async (req, res) => {
       });
       if (onboardingResponse.data.error) throw new Error(onboardingResponse.data.error);
     } else if (!seller.stripeAccountId && country === 'United Kingdom') {
-      const onboardingResponse = await axios.post('http://localhost:5000/api/onboard-seller', {
+      const onboardingResponse = await axios.post('https://foremade-backend.onrender.com/onboard-seller', {
         userId: sellerId,
         country,
         email: transaction.email,
