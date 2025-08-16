@@ -238,9 +238,9 @@ router.post('/initiate-seller-payout', async (req, res) => {
 
 router.post('/approve-payout', async (req, res) => {
   try {
-    console.log('=== Approve Payout Request ===', req.body); // Log full request body first
+    console.log('=== Approve Payout Request ===', req.body);
     const { transactionId, sellerId, amount } = req.body;
-    console.log('Parsed request:', { transactionId, sellerId, amount }); // Confirm parsed values
+    console.log('Parsed request:', { transactionId, sellerId, amount });
 
     if (!transactionId || !sellerId || !amount) {
       console.log('Validation failed: Missing required fields', { transactionId, sellerId, amount });
@@ -309,11 +309,17 @@ router.post('/approve-payout', async (req, res) => {
         return res.status(400).json({ error: 'Insufficient Paystack balance for transfer', details: { availableBalance, amount } });
       }
 
+      // Enforce minimum amount (250 NGN = 25,000 kobo)
+      const minAmount = 250; // Paystack minimum in NGN
+      if (amount < minAmount) {
+        return res.status(400).json({ error: 'Amount below minimum transfer limit', details: { amount, minAmount } });
+      }
+
       const response = await axios.post(
         'https://api.paystack.co/transfer',
         {
           source: 'balance',
-          amount: Math.round(amount * 100),
+          amount: Math.round(amount * 100), // Convert to kobo
           recipient: recipientCode,
           reason: `Payout for transaction ${transactionId}`,
           currency: 'NGN',
@@ -327,7 +333,7 @@ router.post('/approve-payout', async (req, res) => {
           timeout: 30000,
         }
       ).catch(err => {
-        console.log('Paystack transfer error:', err.message, { stack: err.stack });
+        console.log('Paystack transfer error:', err.response?.data || err.message, { stack: err.stack });
         throw new Error(`Paystack transfer failed: ${err.message}`);
       });
 
