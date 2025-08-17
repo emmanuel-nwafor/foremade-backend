@@ -309,11 +309,6 @@ router.post('/approve-payout', async (req, res) => {
         return res.status(400).json({ error: 'Insufficient Paystack balance for transfer', details: { availableBalance, amount } });
       }
 
-      const minAmount = 250;
-      if (amount < minAmount) {
-        return res.status(400).json({ error: 'Amount below minimum transfer limit', details: { amount, minAmount } });
-      }
-
       const response = await axios.post(
         'https://api.paystack.co/transfer',
         {
