@@ -300,13 +300,17 @@ router.post('/approve-payout', async (req, res) => {
         },
         timeout: 30000,
       }).catch(err => {
-        console.log('Paystack balance error:', err.message, { stack: err.stack });
+        console.log('Paystack balance error:', err.message, { stack: err.stack, response: err.response?.data });
         throw new Error(`Paystack balance check failed: ${err.message}`);
       });
-      const availableBalance = balanceResponse.data.data[0].balance / 100;
-      console.log('Paystack balance:', { availableBalance });
-      if (availableBalance < amount) {
-        return res.status(400).json({ error: 'Insufficient Paystack balance for transfer', details: { availableBalance, amount } });
+      const paystackBalance = balanceResponse.data.data[0].balance / 100; // Convert kobo to NGN
+      console.log('Paystack balance:', { paystackBalance, requestedAmount: amount });
+      if (paystackBalance < amount) {
+        return res.status(400).json({
+          error: 'Insufficient Paystack balance for transfer',
+          details: { paystackBalance, amount },
+          suggestion: 'Please top up your Paystack Balance and try again.',
+        });
       }
 
       const response = await axios.post(
