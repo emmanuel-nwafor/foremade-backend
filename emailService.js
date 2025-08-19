@@ -1,11 +1,15 @@
 const nodemailer = require('nodemailer');
 
+// Replace Gmail config with cPanel SMTP SSL/TLS config
 const transporter = nodemailer.createTransport({
-  service: 'gmail', // Example: Use a specific service like 'gmail'. Adjust as needed.
+  host: process.env.SMTP_HOST, // e.g. 'mail.yourdomain.com'
+  port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 465, // 465 for SSL/TLS, 587 for STARTTLS
+  secure: process.env.SMTP_SECURE === 'true' || (!process.env.SMTP_SECURE && (!process.env.SMTP_PORT || process.env.SMTP_PORT === '465')), // true for SSL/TLS, false for STARTTLS
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    user: process.env.EMAIL_USER, // your cPanel email address
+    pass: process.env.EMAIL_PASS  // your cPanel email password
   },
+  requireTLS: process.env.SMTP_REQUIRE_TLS === 'true', // for STARTTLS
   logger: true,
   debug: true, // Enable debug output
 }).on('error', (error) => {

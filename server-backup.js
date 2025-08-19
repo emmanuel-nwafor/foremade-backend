@@ -60,13 +60,29 @@ cloudinary.config({
 const ADMIN_STRIPE_ACCOUNT_ID = process.env.ADMIN_STRIPE_ACCOUNT_ID;
 const ADMIN_PAYSTACK_RECIPIENT_CODE = process.env.ADMIN_PAYSTACK_RECIPIENT_CODE;
 
-// Nodemailer transporter
+// Nodemailer transporter using cPanel SMTP, configurable port and security
+//
+// To use SSL/TLS (port 465):
+//   SMTP_PORT=465
+//   SMTP_SECURE=true
+//   SMTP_REQUIRE_TLS=false (or unset)
+//
+// To use STARTTLS (port 587):
+//   SMTP_PORT=587
+//   SMTP_SECURE=false
+//   SMTP_REQUIRE_TLS=true
+//
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: process.env.SMTP_HOST, // e.g. 'mail.yourdomain.com'
+  port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 465, // 465 for SSL/TLS, 587 for STARTTLS
+  secure: process.env.SMTP_SECURE === 'true' || (!process.env.SMTP_SECURE && (!process.env.SMTP_PORT || process.env.SMTP_PORT === '465')), // true for SSL/TLS, false for STARTTLS
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: process.env.EMAIL_USER, // your cPanel email address
+    pass: process.env.EMAIL_PASS  // your cPanel email password
   },
+  requireTLS: process.env.SMTP_REQUIRE_TLS === 'true', // for STARTTLS
+  logger: true,
+  debug: true, // Enable debug output
 });
 
 // Health check endpoint
