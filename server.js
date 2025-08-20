@@ -98,7 +98,24 @@ app.use(proSellerRoutes);
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`API Documentation available at: http://localhost:${PORT}/api-docs`);
+
+  // Send test emails on deploy if enabled
+  if (process.env.SEND_TEST_EMAILS_ON_DEPLOY === 'true') {
+    try {
+      const testEmail = process.env.TEST_EMAIL_ON_DEPLOY;
+      if (!testEmail || !/\S+@\S+\.\S+/.test(testEmail)) {
+        console.warn('TEST_EMAIL_ON_DEPLOY is not set or invalid. Skipping test emails.');
+        return;
+      }
+      console.log(`Sending test emails to ${testEmail}...`);
+      const { sendAllTemplatesTo } = require('./emailService');
+      await sendAllTemplatesTo(testEmail);
+      console.log('Test emails sent successfully.');
+    } catch (err) {
+      console.error('Error sending test emails on deploy:', err);
+    }
+  }
 });
