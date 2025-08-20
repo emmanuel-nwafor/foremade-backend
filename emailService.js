@@ -743,7 +743,7 @@ module.exports = {
   sendProductApprovedEmail,
   sendOTPEmail,
   sendEmailVerification,
-  sendProSellerRequestReceived,
+  // sendProSellerRequestReceived, // Removed as it is not defined
   sendProductBumpReceipt,
   sendMembershipRevokedEmail,
   sendAllTemplatesTo,
