@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection, increment } = require('firebase/firestore');
+const { doc, getDoc, setDoc, serverTimestamp, updateDoc, addDoc, collection, increment, deleteDoc } = require('firebase/firestore');
 const router = express.Router();
 
 router.post('/onboard-seller', async (req, res) => {
