@@ -777,6 +777,154 @@ async function sendMembershipRevokedEmail({ email }) {
   };
   await transporter.sendMail(mailOptions);
 }
+async function sendSellerOrderNotification({ email, orderId, items, total, currency, shippingDetails }) {
+
+  if (!email || !/\S+@\S+\.\S+/.test(email) || !orderId || !items || !total || !currency || !shippingDetails) {
+    throw new Error('Valid email, orderId, items, total, currency, and shippingDetails are required');
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('Items must be a non-empty array');
+  }
+  if (typeof total !== 'number' || total <= 0) {
+    throw new Error('Total must be a positive number');
+  }
+  if (!['NGN', 'GBP'].includes(currency.toUpperCase())) {
+    throw new Error('Invalid currency');
+  }
+  if (!shippingDetails.name || !shippingDetails.address || !shippingDetails.city || !shippingDetails.postalCode || !shippingDetails.country || !shippingDetails.phone) {
+    throw new Error('Invalid shipping details: missing name, address, city, postalCode, country, or phone');
+  }
+  for (const item of items) {
+    if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
+      throw new Error('Invalid item structure: missing name, quantity, price, or imageUrls');
+    }
+  }
+
+  let currencySymbol = currency.toUpperCase() === 'NGN' ? '₦' : '£';
+  const shippingAddressHtml = `
+    <p>${shippingDetails.name}</p>
+    <p>${shippingDetails.address}</p>
+    <p>${shippingDetails.city}, ${shippingDetails.postalCode}</p>
+    <p>${shippingDetails.country}</p>
+    <p>Phone: ${shippingDetails.phone}</p>
+  `;
+
+  const mailOptions = {
+    from: `"FOREMADE Seller Notifications" <${process.env.SALES_EMAIL || process.env.EMAIL_USER || 'sales@foremade.com'}>`,
+    to: email,
+    subject: `New Order Received #${orderId} - FOREMADE Marketplace`,
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FOREMADE Marketplace - New Seller Order</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #000000; }
+    .header { background-color: #000000; text-align: center; padding: 20px; }
+    .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+    .content { max-width: 600px; margin: 0 auto; padding: 40px 20px; background-color: #ffffff; text-align: center; }
+    .content h2 { color: #000000; font-size: 20px; margin-bottom: 20px; }
+    .content p { font-size: 16px; line-height: 1.6; margin-bottom: 20px; }
+    .items { text-align: left; margin-bottom: 20px; }
+    .items div { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ccc; }
+    .items img { max-width: 60px; height: auto; margin-right: 10px; }
+    .shipping { text-align: left; margin-bottom: 20px; }
+    .shipping p { margin: 5px 0; }
+    .footer { background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #666666; }
+    .footer a { color: #000000; text-decoration: none; margin: 0 10px; }
+    .button { display: inline-block; background-color: #000000; color: #ffffff; padding: 14px 28px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 15px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>FOREMADE MARKETPLACE</h1>
+  </div>
+  <div class="content">
+    <h2>New Order Received #${orderId}</h2>
+    <p>Congratulations! You have received a new order. Please review the details below and prepare the items for shipment.</p>
+    <div class="items">
+      <h3>Items Ordered</h3>
+      ${items.map(item => `
+        <div>
+          <div style="display: flex; align-items: center;">
+            <img src="${item.imageUrls[0] || 'https://via.placeholder.com/60'}" alt="${item.name}" />
+            <span>${item.name} (Qty: ${item.quantity})</span>
+          </div>
+          <span>${currencySymbol}${item.price.toFixed(2)}</span>
+        </div>
+      `).join('')}
+    </div>
+    <div class="shipping">
+      <h3>Shipping Details</h3>
+      ${shippingAddressHtml}
+    </div>
+    <div class="payment">
+      <h3>Order Summary</h3>
+      <p>Order Total: ${currencySymbol}${total.toFixed(2)}</p>
+    </div>
+    <p>Please process the order promptly. Visit your seller dashboard for more details:</p>
+    <a href="https://foremade.com/seller/dashboard" class="button">Go to Seller Dashboard</a>
+  </div>
+  <div class="footer">
+    <p>FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="https://foremade.com/terms-conditions">Terms</a> &nbsp;•&nbsp; <a href="https://foremade.com/privacy-policy">Privacy</a></p>
+    <p>Questions? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a></p>
+  </div>
+</body>
+</html>`
+  };
+  await transporter.sendMail(mailOptions);
+}
+
+async function sendInactiveUserReminder({ email, name }) {
+  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+    throw new Error('Valid email is required');
+  }
+
+  const userName = name || 'there';
+
+  const mailOptions = {
+    from: `"FOREMADE" <${process.env.SUPPORT_EMAIL || process.env.EMAIL_USER || 'support@foremade.com'}>`,
+    to: email,
+    subject: `We Miss You at FOREMADE Marketplace!`,
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>We Miss You - FOREMADE Marketplace</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #000000; }
+    .header { background-color: #000000; text-align: center; padding: 20px; }
+    .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+    .content { max-width: 600px; margin: 0 auto; padding: 40px 20px; background-color: #ffffff; text-align: center; }
+    .content h2 { color: #000000; font-size: 20px; margin-bottom: 20px; }
+    .content p { font-size: 16px; line-height: 1.6; margin-bottom: 20px; }
+    .footer { background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #666666; }
+    .footer a { color: #000000; text-decoration: none; margin: 0 10px; }
+    .button { display: inline-block; background-color: #000000; color: #ffffff; padding: 14px 28px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 15px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div className="header">
+    <h1>FOREMADE MARKETPLACE</h1>
+  </div>
+  <div className="content">
+    <h2>We Miss You, ${userName}!</h2>
+    <p>It’s been a while since you last visited FOREMADE Marketplace. We’ve got new arrivals and exclusive deals waiting for you!</p>
+    <p>Come back and explore what’s new:</p>
+    <a href="https://foremade.com/products" className="button">Shop Now</a>
+    <p>Discover unique products and connect with passionate sellers at FOREMADE.</p>
+  </div>
+  <div className="footer">
+    <p>FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="https://foremade.com/terms">Terms</a> &nbsp;•&nbsp; <a href="https://foremade.com/privacy">Privacy</a></p>
+    <p>Questions? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a></p>
+  </div>
+</body>
+</html>`
+  };
+  await transporter.sendMail(mailOptions);
+}
 
 module.exports = {
   sendDispatchEmail,
@@ -794,6 +942,8 @@ module.exports = {
   sendProductApprovedEmail,
   sendOTPEmail,
   sendEmailVerification,
+  sendSellerOrderNotification,
+  sendInactiveUserReminder,
   // sendProSellerRequestReceived, // Removed as it is not defined
   sendProductBumpReceipt,
   sendMembershipRevokedEmail,

@@ -604,6 +604,8 @@ router.post('/api/youth-empowerment', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+
+
 router.post('/send-seller-order-notification', async (req, res) => {
   try {
     const { orderId, sellerId, items, total, currency, shippingDetails } = req.body;
@@ -660,8 +662,9 @@ router.post('/send-seller-order-notification', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Note: sendSellerOrderNotification is not in emailService.js yet. Add it if needed.
-    res.status(500).json({ error: 'sendSellerOrderNotification not implemented in emailService.js' });
+    await emailService.sendSellerOrderNotification({ email, orderId, items, total, currency, shippingDetails });
+
+    res.status(200).json({ status: 'success', message: 'Seller order notification email sent' });
   } catch (error) {
     console.error('Error sending seller order notification email:', {
       message: error.message,
@@ -671,6 +674,29 @@ router.post('/send-seller-order-notification', async (req, res) => {
     res.status(500).json({ error: 'Failed to send seller order notification email', details: error.message });
   }
 });
+
+// API endpoint to send inactive user email
+router.post('/send-inactive-email', async (req, res) => {
+  try {
+    const { email, name } = req.body;
+
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      console.warn('Invalid request data:', { email });
+      return res.status(400).json({ error: 'Valid email is required' });
+    }
+
+    // Send email without duplicate checking
+    await emailService.sendInactiveUserReminder({ email, name });
+
+    console.log(`Inactive email sent to ${email}`);
+    res.status(200).json({ status: 'success', message: 'Inactive user email sent' });
+  } catch (error) {
+    console.error('Error sending inactive email:', error.message);
+    res.status(500).json({ error: 'Failed to send inactive email', details: error.message });
+  }
+});
+
+module.exports = router;
 
 /**
  * @swagger
