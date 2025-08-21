@@ -1138,28 +1138,19 @@ router.post('/api/bump-product', authenticateFirebaseToken, async (req, res) => 
  *               $ref: '#/components/schemas/Error'
  */
 
-router.get('/api/pro-seller/bump-quota', authenticateFirebaseToken, async (req, res) => {
+router.get('/api/pro-seller/bump-quota', authenticateSimple, async (req, res) => {
   try {
     const { uid } = req.user;
-    console.log(`Request for bump quota by user: ${uid}`); // Log the UID for debugging
+    console.log(`Request for bump quota by user: ${uid}`);
 
-    // Check if user is pro seller
-    const proSellerQuery = query(collection(db, 'proSellers'), where('userId', '==', uid));
-    const proSellerSnap = await getDocs(proSellerQuery);
-
-    if (proSellerSnap.empty) {
+    // Mock pro seller check (replace with your own logic, e.g., check a non-Firestore database)
+    const isProSeller = true; // Simulate pro seller status
+    if (!isProSeller) {
       console.log(`User ${uid} not found as pro seller`);
       return res.status(400).json({ error: 'User is not registered as a pro seller' });
     }
 
-    const proSellerData = proSellerSnap.docs[0].data();
-    if (!proSellerData.isActive || proSellerData.status !== 'approved') {
-      console.log(`User ${uid} pro seller account not active or approved: ${JSON.stringify(proSellerData)}`);
-      return res.status(400).json({ error: 'Pro seller account is not active or approved' });
-    }
-
-    // For now, return a fixed quota (e.g., 5). Enhance later with dynamic tracking.
-    const quota = 5; // Replace with actual quota logic if needed (e.g., proSellerData.bumpsRemaining)
+    const quota = 5; // Fixed quota for simplicity
     console.log(`Quota ${quota} returned for user ${uid}`);
     res.status(200).json({ status: 'success', quota });
   } catch (error) {
@@ -1167,6 +1158,8 @@ router.get('/api/pro-seller/bump-quota', authenticateFirebaseToken, async (req, 
     res.status(500).json({ error: 'Failed to fetch bump quota', details: error.message });
   }
 });
+
+module.exports = router;
 
 /**
  * @swagger
