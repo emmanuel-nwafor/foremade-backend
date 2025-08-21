@@ -1140,23 +1140,17 @@ router.post('/api/bump-product', authenticateFirebaseToken, async (req, res) => 
 
 router.get('/api/pro-seller/bump-quota', async (req, res) => {
   try {
-    const { uid } = req.user;
-    console.log(`Request for bump quota by user: ${uid}`);
-
-    const isProSeller = true; // Simulate pro seller status
-    if (!isProSeller) {
-      console.log(`User ${uid} not found as pro seller`);
-      return res.status(400).json({ error: 'User is not registered as a pro seller' });
-    }
-
+    console.log('Request for bump quota received');
     const quota = 5; // Fixed quota for simplicity
-    console.log(`Quota ${quota} returned for user ${uid}`);
+    console.log(`Quota ${quota} returned`);
     res.status(200).json({ status: 'success', quota });
   } catch (error) {
     console.error('Fetch bump quota error:', error);
     res.status(500).json({ error: 'Failed to fetch bump quota', details: error.message });
   }
 });
+
+module.exports = router;
 
 module.exports = router;
 
