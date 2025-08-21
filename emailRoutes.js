@@ -662,16 +662,21 @@ router.post('/send-seller-order-notification', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
+    // Send notification to seller
     await emailService.sendSellerOrderNotification({ email, orderId, items, total, currency, shippingDetails });
 
-    res.status(200).json({ status: 'success', message: 'Seller order notification email sent' });
+    // Send notification to admin
+    const adminEmail = 'Foremade@icloud.com';
+    await emailService.sendSellerOrderNotification({ email: adminEmail, orderId, items, total, currency, shippingDetails });
+
+    res.status(200).json({ status: 'success', message: 'Seller and admin order notification emails sent' });
   } catch (error) {
-    console.error('Error sending seller order notification email:', {
+    console.error('Error sending seller or admin order notification email:', {
       message: error.message,
       stack: error.stack,
       payload: JSON.stringify(req.body, null, 2),
     });
-    res.status(500).json({ error: 'Failed to send seller order notification email', details: error.message });
+    res.status(500).json({ error: 'Failed to send seller or admin order notification email', details: error.message });
   }
 });
 

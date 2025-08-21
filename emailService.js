@@ -778,7 +778,6 @@ async function sendMembershipRevokedEmail({ email }) {
   await transporter.sendMail(mailOptions);
 }
 async function sendSellerOrderNotification({ email, orderId, items, total, currency, shippingDetails }) {
-
   if (!email || !/\S+@\S+\.\S+/.test(email) || !orderId || !items || !total || !currency || !shippingDetails) {
     throw new Error('Valid email, orderId, items, total, currency, and shippingDetails are required');
   }
@@ -809,7 +808,8 @@ async function sendSellerOrderNotification({ email, orderId, items, total, curre
     <p>Phone: ${shippingDetails.phone}</p>
   `;
 
-  const mailOptions = {
+  // Send to Seller
+  const sellerMailOptions = {
     from: `"FOREMADE Seller Notifications" <${process.env.SALES_EMAIL || process.env.EMAIL_USER || 'sales@foremade.com'}>`,
     to: email,
     subject: `New Order Received #${orderId} - FOREMADE Marketplace`,
@@ -873,7 +873,85 @@ async function sendSellerOrderNotification({ email, orderId, items, total, curre
 </body>
 </html>`
   };
-  await transporter.sendMail(mailOptions);
+
+  // Send to Admin
+  const adminMailOptions = {
+    from: `"FOREMADE Admin Notifications" <${process.env.ADMIN_EMAIL || process.env.EMAIL_USER || 'admin@foremade.com'}>`,
+    to: 'Foremade@icloud.com',
+    subject: `New Order Alert #${orderId} - FOREMADE Marketplace`,
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FOREMADE Marketplace - New Order Alert</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #000000; }
+    .header { background-color: #000000; text-align: center; padding: 20px; }
+    .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+    .content { max-width: 600px; margin: 0 auto; padding: 40px 20px; background-color: #ffffff; text-align: center; }
+    .content h2 { color: #000000; font-size: 20px; margin-bottom: 20px; }
+    .content p { font-size: 16px; line-height: 1.6; margin-bottom: 20px; }
+    .items { text-align: left; margin-bottom: 20px; }
+    .items div { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ccc; }
+    .items img { max-width: 60px; height: auto; margin-right: 10px; }
+    .shipping { text-align: left; margin-bottom: 20px; }
+    .shipping p { margin: 5px 0; }
+    .footer { background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #666666; }
+    .footer a { color: #000000; text-decoration: none; margin: 0 10px; }
+    .button { display: inline-block; background-color: #000000; color: #ffffff; padding: 14px 28px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 15px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>FOREMADE MARKETPLACE</h1>
+  </div>
+  <div class="content">
+    <h2>New Order Alert #${orderId}</h2>
+    <p>A new order has been placed. Please review the details below for administrative action if needed.</p>
+    <div class="items">
+      <h3>Items Ordered</h3>
+      ${items.map(item => `
+        <div>
+          <div style="display: flex; align-items: center;">
+            <img src="${item.imageUrls[0] || 'https://via.placeholder.com/60'}" alt="${item.name}" />
+            <span>${item.name} (Qty: ${item.quantity})</span>
+          </div>
+          <span>${currencySymbol}${item.price.toFixed(2)}</span>
+        </div>
+      `).join('')}
+    </div>
+    <div class="shipping">
+      <h3>Shipping Details</h3>
+      ${shippingAddressHtml}
+    </div>
+    <div class="payment">
+      <h3>Order Summary</h3>
+      <p>Order Total: ${currencySymbol}${total.toFixed(2)}</p>
+    </div>
+    <p>Monitor this order via the admin dashboard:</p>
+    <a href="https://foremade.com/admin/dashboard" class="button">Go to Admin Dashboard</a>
+  </div>
+  <div class="footer">
+    <p>FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="https://foremade.com/terms-conditions">Terms</a> &nbsp;•&nbsp; <a href="https://foremade.com/privacy-policy">Privacy</a></p>
+    <p>Questions? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a></p>
+  </div>
+</body>
+</html>`
+  };
+
+  try {
+    await transporter.sendMail(sellerMailOptions);
+    await transporter.sendMail(adminMailOptions);
+  } catch (error) {
+    console.error('Error sending emails:', {
+      message: error.message,
+      stack: error.stack,
+      sellerEmail: email,
+      adminEmail: 'Foremade@icloud.com',
+    });
+    throw new Error('Failed to send one or both emails');
+  }
 }
 
 async function sendInactiveUserReminder({ email, name }) {
