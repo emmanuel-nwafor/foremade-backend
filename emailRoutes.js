@@ -471,11 +471,8 @@ router.post('/api/youth-empowerment', async (req, res) => {
   const formData = req.body;
   try {
     console.log('[YOUTH EMPOWERMENT] Received formData:', formData);
-    console.log('[YOUTH EMPOWERMENT] EMAIL_USER:', process.env.EMAIL_USER);
-    console.log('[YOUTH EMPOWERMENT] EMAIL_PASS:', process.env.EMAIL_PASS ? 'SET' : 'NOT SET');
-    console.log('[YOUTH EMPOWERMENT] Sending to:', 'yehub@foremade.com');
-    // Note: sendYouthEmpowermentApplication is not in emailService.js yet. Add it if needed.
-    res.status(500).json({ error: 'sendYouthEmpowermentApplication not implemented in emailService.js' });
+    await emailService.sendYouthEmpowermentApplication(formData);
+    res.json({ message: 'Application sent successfully!' });
   } catch (err) {
     console.error('[YOUTH EMPOWERMENT] Failed to send email:', {
       message: err.message,

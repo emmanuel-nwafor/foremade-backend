@@ -1,3 +1,54 @@
+// Send Youth Empowerment Application Email
+async function sendYouthEmpowermentApplication(formData) {
+  const {
+    firstName,
+    lastName,
+    email,
+    phone,
+    age,
+    location,
+    education,
+    skills,
+    motivation
+  } = formData;
+
+  const toEmail = 'yehub@foremade.com';
+  const subject = 'New Youth Empowerment Application Submission';
+  const html = `
+    <html>
+      <head>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f7f7f7; color: #222; }
+          .container { max-width: 600px; margin: 30px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #eee; padding: 32px; }
+          h2 { color: #0F2940; }
+          .field { margin-bottom: 16px; }
+          .label { font-weight: bold; color: #0F2940; }
+          .value { margin-left: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h2>Youth Empowerment Application</h2>
+          <div class="field"><span class="label">Name:</span><span class="value">${firstName || ''} ${lastName || ''}</span></div>
+          <div class="field"><span class="label">Email:</span><span class="value">${email || ''}</span></div>
+          <div class="field"><span class="label">Phone:</span><span class="value">${phone || ''}</span></div>
+          <div class="field"><span class="label">Age:</span><span class="value">${age || ''}</span></div>
+          <div class="field"><span class="label">Location:</span><span class="value">${location || ''}</span></div>
+          <div class="field"><span class="label">Education:</span><span class="value">${education || ''}</span></div>
+          <div class="field"><span class="label">Skills:</span><span class="value">${Array.isArray(skills) ? skills.join(', ') : skills || ''}</span></div>
+          <div class="field"><span class="label">Motivation:</span><span class="value">${motivation || ''}</span></div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  await transporter.sendMail({
+    from: `"FOREMADE" <${process.env.SUPPORT_EMAIL || process.env.EMAIL_USER || 'support@foremade.com'}>`,
+    to: toEmail,
+    subject,
+    html
+  });
+}
 // Sends a dispatch notification email to a customer
 async function sendDispatchEmail({
   email,
@@ -747,4 +798,5 @@ module.exports = {
   sendProductBumpReceipt,
   sendMembershipRevokedEmail,
   sendAllTemplatesTo,
+  sendYouthEmpowermentApplication,
 };
