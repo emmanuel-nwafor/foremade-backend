@@ -1138,12 +1138,11 @@ router.post('/api/bump-product', authenticateFirebaseToken, async (req, res) => 
  *               $ref: '#/components/schemas/Error'
  */
 
-router.get('/api/pro-seller/bump-quota', authenticateSimple, async (req, res) => {
+router.get('/api/pro-seller/bump-quota', async (req, res) => {
   try {
     const { uid } = req.user;
     console.log(`Request for bump quota by user: ${uid}`);
 
-    // Mock pro seller check (replace with your own logic, e.g., check a non-Firestore database)
     const isProSeller = true; // Simulate pro seller status
     if (!isProSeller) {
       console.log(`User ${uid} not found as pro seller`);
