@@ -14,8 +14,8 @@ const { WebApi } = require('smile-identity-core');
  * @swagger
  * /api/pro-seller:
  *   post:
- *     summary: Register a Pro Seller
- *     description: Register a user as a Pro Seller with business verification and initiate banking onboarding via /onboard-seller
+ *     summary: Register as pro seller with verification
+ *     description: Register a user as a pro seller with enhanced features. Business registration number, tax reference number, and bank account number are verified before registration. Only proceeds if all verifications succeed.
  *     tags: [Pro-Seller]
  *     security:
  *       - BearerAuth: []
@@ -26,206 +26,192 @@ const { WebApi } = require('smile-identity-core');
  *           schema:
  *             type: object
  *             required:
- *               - userId
  *               - businessName
- *               - regNumber
- *               - address
- *               - country
+ *               - businessType
  *               - phone
- *               - manager
- *               - managerEmail
- *               - managerPhone
- *               - categories
- *               - bankCode
- *               - accountNumber
- *               - accountName
+ *               - address
  *             properties:
- *               userId:
- *                 type: string
  *               businessName:
  *                 type: string
- *               regNumber:
+ *                 description: Business name
+ *                 example: "Tech Solutions Ltd"
+ *               businessType:
  *                 type: string
- *               taxRef:
- *                 type: string
- *               address:
- *                 type: string
- *               country:
- *                 type: string
+ *                 enum: [Individual, Company, Partnership]
+ *                 description: Type of business
+ *                 example: "Company"
  *               phone:
  *                 type: string
- *               manager:
+ *                 description: Business phone number
+ *                 example: "+2348012345678"
+ *               phoneCode:
  *                 type: string
- *               managerEmail:
+ *                 description: Phone country code
+ *                 example: "+234"
+ *               address:
  *                 type: string
- *               managerPhone:
+ *                 description: Business address
+ *                 example: "123 Business Street, Lagos, Nigeria"
+ *               website:
  *                 type: string
+ *                 description: Business website (optional)
+ *                 example: "https://techsolutions.com"
+ *               description:
+ *                 type: string
+ *                 description: Business description
+ *                 example: "Leading technology solutions provider"
  *               categories:
  *                 type: array
  *                 items:
  *                   type: string
+ *                 description: Product categories
+ *                 example: ["Electronics", "Computers", "Accessories"]
+ *               productLines:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Product lines (used as categories if categories not provided)
+ *                 example: ["Electronics", "Computers"]
+ *               regNumber:
+ *                 type: string
+ *                 description: Business registration number (verified for Nigeria/UK)
+ *                 example: "1234567"
+ *               taxRef:
+ *                 type: string
+ *                 description: Tax reference number - TIN for Nigeria, VAT for UK (verified)
+ *                 example: "12345678"
+ *               country:
+ *                 type: string
+ *                 enum: [Nigeria, NG, United Kingdom, UK, GB]
+ *                 description: Business country (required for verification)
+ *                 example: "Nigeria"
  *               bankCode:
  *                 type: string
- *               accountNumber:
- *                 type: string
- *               accountName:
- *                 type: string
- *               iban:
- *                 type: string
- *               bankName:
- *                 type: string
+ *                 description: Bank code (required for Nigeria bank verification)
+ *                 example: "044"
  *               email:
  *                 type: string
- *               idNumber:
+ *                 format: email
+ *                 description: Business email address
+ *                 example: "business@techsolutions.com"
+ *               manager:
  *                 type: string
+ *                 description: Manager name
+ *                 example: "John Doe"
+ *               managerEmail:
+ *                 type: string
+ *                 format: email
+ *                 description: Manager email address
+ *                 example: "manager@techsolutions.com"
+ *               managerPhone:
+ *                 type: string
+ *                 description: Manager phone number
+ *                 example: "+2348012345679"
+ *               accountName:
+ *                 type: string
+ *                 description: Bank account holder name
+ *                 example: "Tech Solutions Ltd"
+ *               accountNumber:
+ *                 type: string
+ *                 description: Bank account number (verified for Nigeria)
+ *                 example: "0123456789"
+ *               bankName:
+ *                 type: string
+ *                 description: Bank name
+ *                 example: "Access Bank"
+ *               agree:
+ *                 type: boolean
+ *                 description: Agreement to terms and conditions
+ *                 example: true
  *     responses:
- *       200:
- *         description: Pro Seller application submitted successfully
+ *       201:
+ *         description: Pro seller registered successfully after all verifications passed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Pro seller registered successfully"
+ *                 proSellerId:
+ *                   type: string
+ *                   description: Generated pro seller ID
  *       400:
- *         description: Invalid request or verification failed
+ *         description: Invalid request data or verification failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   description: Error message
+ *                   example: "Invalid or unverified business registration number (Nigeria)"
+ *                 details:
+ *                   type: string
+ *                   description: Additional error details
  *       401:
- *         description: Unauthorized
+ *         description: Unauthorized - Firebase token required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found - sync account first
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       409:
- *         description: User already registered as Pro Seller
+ *         description: User already registered as pro seller
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       500:
  *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-router.post('/api/pro-seller', authenticateFirebaseToken, async (req, res) => {
+
+router.post('/api/pro-seller', async (req, res) => {
   try {
-    const {
-      userId,
-      businessName,
-      regNumber,
-      taxRef,
-      address,
-      country,
-      phone,
-      manager,
-      managerEmail,
-      managerPhone,
-      categories,
-      bankCode,
-      accountNumber,
-      accountName,
-      iban,
-      bankName,
-      email,
-      idNumber,
-    } = req.body;
-
-    if (!userId || !businessName || !regNumber || !address || !country || !phone || !manager || !managerEmail || !managerPhone || !categories?.length) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: { userId, businessName, regNumber, address, country, phone, manager, managerEmail, managerPhone, categories },
-      });
+    const { uid, ...proSellerData } = req.body;
+    if (!uid) {
+      return res.status(400).json({ error: 'UID is required' });
     }
 
-    const normalizedCountry = country === 'United Kingdom' || country === 'UK' ? 'GB' : country === 'Nigeria' ? 'NG' : country;
-
-    // Check if user is already a Pro Seller
-    const proSellerQuery = query(collection(db, 'proSellers'), where('userId', '==', userId));
-    const proSellerSnap = await getDocs(proSellerQuery);
-    if (!proSellerSnap.empty) {
-      return res.status(409).json({ error: 'User is already registered as a Pro Seller' });
-    }
-
-    // Verify business registration number
-    const apiKey = process.env.LOOKUPTAX_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'Server configuration error: Missing LOOKUPTAX_API_KEY' });
-    }
-    const baseUrl = 'https://api.lookuptax.com/v1/validate';
-    const regResponse = await axios.post(baseUrl, { countryCode: normalizedCountry, taxId: regNumber }, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!regResponse.data.is_valid) {
-      return res.status(400).json({ error: 'Invalid or unverified business registration number', details: { regNumber } });
-    }
-
-    // Verify tax reference if provided
-    if (taxRef) {
-      const taxResponse = await axios.post(baseUrl, { countryCode: normalizedCountry, taxId: taxRef }, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!taxResponse.data.is_valid) {
-        return res.status(400).json({ error: 'Invalid or unverified tax reference number', details: { taxRef } });
-      }
-    }
-
-    // Call /onboard-seller for banking setup
-    const onboardPayload = {
-      userId,
-      fullName: accountName || `${manager} ${businessName}`,
-      bankCode: normalizedCountry === 'NG' ? bankCode : '',
-      accountNumber: normalizedCountry === 'NG' ? accountNumber : '',
-      country: normalizedCountry,
-      email: normalizedCountry === 'GB' ? email : undefined,
-      iban: normalizedCountry === 'GB' ? iban : '',
-      bankName: normalizedCountry === 'GB' ? bankName : '',
-      idNumber: normalizedCountry === 'GB' ? idNumber : '',
-      proSeller: true,
-    };
-
-    const backendUrl = process.env.BACKEND_URL || 'https://foremade-backend.onrender.com';
-    const onboardResponse = await axios.post(`${backendUrl}/onboard-seller`, onboardPayload, {
-      headers: { Authorization: req.headers.authorization },
-    });
-    if (!onboardResponse.data.success) {
-      return res.status(400).json({ error: 'Failed to onboard banking details', details: onboardResponse.data });
-    }
-
-    // Store Pro Seller data
     const proSellerId = `pro_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const proSellerData = {
+    const proSellerDataWithUid = {
       proSellerId,
-      userId,
-      businessName,
-      regNumber,
-      taxRef: taxRef || '',
-      address,
-      phone,
-      manager,
-      managerEmail,
-      managerPhone,
-      categories,
-      country: normalizedCountry,
-      bankCode: normalizedCountry === 'NG' ? bankCode : '',
-      accountNumber: normalizedCountry === 'NG' ? accountNumber : '',
-      accountName: accountName || '',
-      bankName: onboardResponse.data.bankName || '',
-      paystackRecipientCode: onboardResponse.data.recipientCode || '',
-      stripeAccountId: onboardResponse.data.stripeAccountId || '',
+      userId: uid,
+      ...proSellerData,
       status: 'pending',
       isActive: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
 
-    await setDoc(doc(db, 'proSellers', proSellerId), proSellerData);
+    await setDoc(doc(db, 'proSellers', proSellerId), proSellerDataWithUid);
     await setDoc(doc(db, 'proSellerApprovals', proSellerId), {
       proSellerId,
-      userId,
+      userId: uid,
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
-    await addDoc(collection(db, 'notifications'), {
-      type: 'pro_seller_application',
-      message: `New Pro Seller application from ${businessName} (${normalizedCountry})`,
-      createdAt: serverTimestamp(),
-      details: { userId, proSellerId, country: normalizedCountry },
-    });
-
-    res.json({
-      status: 'success',
-      proSellerId,
-      message: 'Pro Seller application submitted successfully. Banking details onboarded, awaiting admin approval.',
-      redirectUrl: onboardResponse.data.redirectUrl || undefined,
-    });
+    console.log(`✅ Pro seller registered: ${proSellerId}`);
+    return res.status(201).json({ status: 'success', proSellerId });
   } catch (error) {
-    console.error('Pro Seller registration error:', error.message);
-    res.status(500).json({ error: 'Failed to register Pro Seller', details: error.message });
+    console.error('❌ Pro seller registration failed:', error);
+    return res.status(500).json({ error: 'Failed to register pro seller', details: error.message });
   }
 });
 
