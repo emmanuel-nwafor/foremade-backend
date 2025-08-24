@@ -781,6 +781,9 @@ async function sendSellerOrderNotification({ email, orderId, items, total, curre
   if (!email || !/\S+@\S+\.\S+/.test(email) || !orderId || !items || !total || !currency || !shippingDetails) {
     throw new Error('Valid email, orderId, items, total, currency, and shippingDetails are required');
   }
+  if (!/^\d{12}$/.test(orderId)) {
+    throw new Error('Order ID must be a 12-digit numeric string');
+  }
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('Items must be a non-empty array');
   }
@@ -808,7 +811,7 @@ async function sendSellerOrderNotification({ email, orderId, items, total, curre
     <p>Phone: ${shippingDetails.phone}</p>
   `;
 
-  // Send to Seller
+  // Seller Email
   const sellerMailOptions = {
     from: `"FOREMADE Seller Notifications" <${process.env.SALES_EMAIL || process.env.EMAIL_USER || 'sales@foremade.com'}>`,
     to: email,
@@ -874,7 +877,7 @@ async function sendSellerOrderNotification({ email, orderId, items, total, curre
 </html>`
   };
 
-  // Send to Admin
+  // Admin Email
   const adminMailOptions = {
     from: `"FOREMADE Admin Notifications" <${process.env.ADMIN_EMAIL || process.env.EMAIL_USER || 'admin@foremade.com'}>`,
     to: 'Foremade@icloud.com',
@@ -940,17 +943,92 @@ async function sendSellerOrderNotification({ email, orderId, items, total, curre
 </html>`
   };
 
+  // Logistics Email
+  const logisticsMailOptions = {
+    from: `"FOREMADE Logistics Notifications" <${process.env.LOGISTICS_EMAIL || process.env.EMAIL_USER || 'logistics@foremade.com'}>`,
+    to: 'logistics@foremade.com',
+    subject: `New Order for Delivery #${orderId} - FOREMADE Marketplace`,
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FOREMADE Marketplace - New Order for Delivery</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #000000; }
+    .header { background-color: #000000; text-align: center; padding: 20px; }
+    .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+    .content { max-width: 600px; margin: 0 auto; padding: 40px 20px; background-color: #ffffff; text-align: center; }
+    .content h2 { color: #000000; font-size: 20px; margin-bottom: 20px; }
+    .content p { font-size: 16px; line-height: 1.6; margin-bottom: 20px; }
+    .items { text-align: left; margin-bottom: 20px; }
+    .items div { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ccc; }
+    .items img { max-width: 60px; height: auto; margin-right: 10px; }
+    .shipping { text-align: left; margin-bottom: 20px; }
+    .shipping p { margin: 5px 0; }
+    .footer { background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #666666; }
+    .footer a { color: #000000; text-decoration: none; margin: 0 10px; }
+    .button { display: inline-block; background-color: #000000; color: #ffffff; padding: 14px 28px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 15px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>FOREMADE MARKETPLACE</h1>
+  </div>
+  <div class="content">
+    <h2>New Order for Delivery #${orderId}</h2>
+    <p>A new order requires delivery coordination. Please review the details below and arrange for pickup and delivery.</p>
+    <div class="items">
+      <h3>Items to Deliver</h3>
+      ${items.map(item => `
+        <div>
+          <div style="display: flex; align-items: center;">
+            <img src="${item.imageUrls[0] || 'https://via.placeholder.com/60'}" alt="${item.name}" />
+            <span>${item.name} (Qty: ${item.quantity})</span>
+          </div>
+          <span>${currencySymbol}${item.price.toFixed(2)}</span>
+        </div>
+      `).join('')}
+    </div>
+    <div class="shipping">
+      <h3>Delivery Details</h3>
+      ${shippingAddressHtml}
+    </div>
+    <div class="payment">
+      <h3>Order Summary</h3>
+      <p>Order Total: ${currencySymbol}${total.toFixed(2)}</p>
+    </div>
+    <p>Coordinate delivery via the logistics dashboard:</p>
+    <a href="https://foremade.com/logistics/dashboard" class="button">Go to Logistics Dashboard</a>
+  </div>
+  <div class="footer">
+    <p>FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="https://foremade.com/terms-conditions">Terms</a> &nbsp;•&nbsp; <a href="https://foremade.com/privacy-policy">Privacy</a></p>
+    <p>Questions? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a></p>
+  </div>
+</body>
+</html>`
+  };
+
   try {
-    await transporter.sendMail(sellerMailOptions);
-    await transporter.sendMail(adminMailOptions);
+    await Promise.all([
+      transporter.sendMail(sellerMailOptions),
+      transporter.sendMail(adminMailOptions),
+      transporter.sendMail(logisticsMailOptions),
+    ]);
+    console.log('Emails sent successfully to seller, admin, and logistics:', {
+      sellerEmail: email,
+      adminEmail: 'Foremade@icloud.com',
+      logisticsEmail: 'logistics@foremade.com',
+    });
   } catch (error) {
     console.error('Error sending emails:', {
       message: error.message,
       stack: error.stack,
       sellerEmail: email,
       adminEmail: 'Foremade@icloud.com',
+      logisticsEmail: 'logistics@foremade.com',
     });
-    throw new Error('Failed to send one or both emails');
+    throw new Error('Failed to send one or more emails');
   }
 }
 

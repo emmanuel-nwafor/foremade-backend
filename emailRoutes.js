@@ -623,6 +623,10 @@ router.post('/send-seller-order-notification', async (req, res) => {
       console.warn('Missing required fields:', { orderId, sellerId, items, total, currency, shippingDetails });
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    if (!/^\d{12}$/.test(orderId)) {
+      console.warn('Invalid orderId format:', orderId);
+      return res.status(400).json({ error: 'Order ID must be a 12-digit numeric string' });
+    }
     if (!Array.isArray(items) || items.length === 0) {
       console.warn('Invalid items array:', items);
       return res.status(400).json({ error: 'Items must be a non-empty array' });
@@ -639,7 +643,6 @@ router.post('/send-seller-order-notification', async (req, res) => {
       console.warn('Invalid shipping details:', shippingDetails);
       return res.status(400).json({ error: 'Invalid shipping details: missing name, address, city, postalCode, country, or phone' });
     }
-
     for (const item of items) {
       if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
         console.warn('Invalid item structure:', item);
@@ -662,21 +665,16 @@ router.post('/send-seller-order-notification', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Send notification to seller
     await emailService.sendSellerOrderNotification({ email, orderId, items, total, currency, shippingDetails });
 
-    // Send notification to admin
-    const adminEmail = 'Foremade@icloud.com';
-    await emailService.sendSellerOrderNotification({ email: adminEmail, orderId, items, total, currency, shippingDetails });
-
-    res.status(200).json({ status: 'success', message: 'Seller and admin order notification emails sent' });
+    res.status(200).json({ status: 'success', message: 'Order notification emails sent to seller, admin, and logistics' });
   } catch (error) {
-    console.error('Error sending seller or admin order notification email:', {
+    console.error('Error sending order notification emails:', {
       message: error.message,
       stack: error.stack,
       payload: JSON.stringify(req.body, null, 2),
     });
-    res.status(500).json({ error: 'Failed to send seller or admin order notification email', details: error.message });
+    res.status(500).json({ error: 'Failed to send order notification emails', details: error.message });
   }
 });
 

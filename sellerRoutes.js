@@ -202,6 +202,13 @@ router.post('/initiate-seller-payout', async (req, res) => {
     }
     const seller = sellerSnap.data();
 
+    // NEW: Deduct from available, add to pendingWithdrawals on request
+    await updateDoc(walletRef, {
+      availableBalance: increment(-amount),
+      pendingWithdrawals: increment(amount),
+      updatedAt: serverTimestamp(),
+    });
+
     const transactionReference = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const transactionDoc = await addDoc(collection(db, 'transactions'), {
       sellerId,
@@ -282,8 +289,9 @@ router.post('/approve-payout', async (req, res) => {
     }
     const walletData = walletSnap.data();
     console.log('Wallet data:', { availableBalance: walletData.availableBalance });
-    if (walletData.availableBalance < amount) {
-      return res.status(400).json({ error: 'Insufficient available balance for payout', details: { availableBalance: walletData.availableBalance, amount } });
+    // NEW: No need to check availableBalance (already deducted on initiate). Check pendingWithdrawals instead.
+    if (walletData.pendingWithdrawals < amount) {
+      return res.status(400).json({ error: 'Insufficient pending withdrawals for payout', details: { pendingWithdrawals: walletData.pendingWithdrawals, amount } });
     }
 
     if (country === 'Nigeria') {
@@ -336,8 +344,9 @@ router.post('/approve-payout', async (req, res) => {
       });
 
       if (response.data.status && ['success', 'pending'].includes(response.data.data.status)) {
+        // NEW: Deduct from pendingWithdrawals (no availableBalance change)
         await updateDoc(walletRef, {
-          availableBalance: increment(-amount),
+          pendingWithdrawals: increment(-amount),
           updatedAt: serverTimestamp(),
         });
         await updateDoc(transactionRef, {
@@ -374,8 +383,9 @@ router.post('/approve-payout', async (req, res) => {
         console.log('Stripe transfer error:', err.message, { stack: err.stack });
         throw new Error(`Stripe transfer failed: ${err.message}`);
       });
+      // NEW: Deduct from pendingWithdrawals (no availableBalance change)
       await updateDoc(walletRef, {
-        availableBalance: increment(-amount),
+        pendingWithdrawals: increment(-amount),
         updatedAt: serverTimestamp(),
       });
       await updateDoc(transactionRef, {
@@ -434,8 +444,10 @@ router.post('/reject-payout', async (req, res) => {
       status: 'Rejected',
       updatedAt: serverTimestamp(),
     });
+    // NEW: Add back to availableBalance, deduct from pendingWithdrawals
     await updateDoc(walletRef, {
       availableBalance: increment(amount),
+      pendingWithdrawals: increment(-amount),
       updatedAt: serverTimestamp(),
     });
 
@@ -479,6 +491,12 @@ router.post('/paystack-webhook', async (req, res) => {
       const transactionSnap = await getDoc(transactionRef);
       if (transactionSnap.exists()) {
         const { sellerId, amount } = transactionSnap.data();
+        // NEW: Deduct from pendingWithdrawals on success
+        const walletRef = doc(db, 'wallets', sellerId);
+        await updateDoc(walletRef, {
+          pendingWithdrawals: increment(-amount),
+          updatedAt: serverTimestamp(),
+        });
         await updateDoc(transactionRef, {
           status: 'Approved',
           transferReference: event.data.reference,
@@ -509,8 +527,10 @@ router.post('/paystack-webhook', async (req, res) => {
         const walletRef = doc(db, 'wallets', sellerId);
         const walletSnap = await getDoc(walletRef);
         if (walletSnap.exists()) {
+          // NEW: Add back to available, deduct from pendingWithdrawals on failure
           await updateDoc(walletRef, {
             availableBalance: increment(amount),
+            pendingWithdrawals: increment(-amount),
             updatedAt: serverTimestamp(),
           });
         }
