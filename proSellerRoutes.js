@@ -1812,6 +1812,8 @@ router.post('/api/admin/approve-pro-seller', async (req, res) => { // Removed au
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+const crypto = require('crypto');
+
 router.post('/api/verify-business-reg', async (req, res) => {
   res.setHeader('Content-Type', 'application/json'); // Force JSON content type
 
@@ -1851,6 +1853,13 @@ router.post('/api/verify-business-reg', async (req, res) => {
     const jobId = `JOB_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     const timestamp = new Date().toISOString();
 
+    // Generate signature using HMAC-SHA256 with SMILE_API_KEY as secret
+    const signatureString = `${smilePartnerId}${jobId}${timestamp}`;
+    const signature = crypto
+      .createHmac('sha256', smileApiKey)
+      .update(signatureString)
+      .digest('hex');
+
     // Prepare payload for Smile Identity
     const payload = {
       partner_id: smilePartnerId,
@@ -1862,6 +1871,7 @@ router.post('/api/verify-business-reg', async (req, res) => {
       partner_params: {
         job_id: jobId,
         timestamp: timestamp,
+        signature: signature,
       },
     };
 
