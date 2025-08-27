@@ -1463,4 +1463,165 @@ router.post('/send-membership-revoked-email', async (req, res) => {
   }
 });
 
+// Endpoint to request a password reset link
+/**
+ * @swagger
+ * /api/request-password-reset:
+ *   post:
+ *     summary: Request a password reset link
+ *     description: Sends a password reset link to the user's email if the email exists in Firestore.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: The user's email address
+ *     responses:
+ *       200:
+ *         description: Password reset link sent successfully
+ *       400:
+ *         description: Invalid email or user not found
+ *       500:
+ *         description: Server error
+ */
+router.post('/request-password-reset', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+    return res.status(400).json({ error: 'Valid email is required' });
+  }
+
+  try {
+    // Check if user exists in Firestore
+    const userSnapshot = await db.collection('users').where('email', '==', email).get();
+    if (userSnapshot.empty) {
+      return res.status(400).json({ error: 'No user found with this email' });
+    }
+
+    const userDoc = userSnapshot.docs[0];
+    const userId = userDoc.id;
+
+    // Generate a reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpiry = Date.now() + 3600000; // 1 hour expiry
+
+    // Store token in Firestore
+    await db.collection('passwordResetTokens').doc(userId).set({
+      email,
+      resetToken,
+      expiry: tokenExpiry,
+      used: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // Send reset email
+    await sendPasswordResetEmail({ email, resetToken });
+    res.status(200).json({ message: 'Password reset link sent to your email' });
+  } catch (error) {
+    console.error('Error in request-password-reset:', error);
+    res.status(500).json({ error: `Failed to send password reset link: ${error.message}` });
+  }
+});
+
+// Endpoint to reset password
+/**
+ * @swagger
+ * /api/reset-password:
+ *   post:
+ *     summary: Reset user password
+ *     description: Verifies the reset token and updates the user's password in Firestore.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - token
+ *               - newPassword
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: The user's email address
+ *               token:
+ *                 type: string
+ *                 description: The password reset token
+ *               newPassword:
+ *                 type: string
+ *                 description: The new password (minimum 8 characters)
+ *     responses:
+ *       200:
+ *         description: Password reset successfully
+ *       400:
+ *         description: Invalid token, expired token, or invalid password
+ *       500:
+ *         description: Server error
+ */
+router.post('/reset-password', async (req, res) => {
+  const { email, token, newPassword } = req.body;
+
+  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+    return res.status(400).json({ error: 'Valid email is required' });
+  }
+  if (!token) {
+    return res.status(400).json({ error: 'Reset token is required' });
+  }
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  }
+
+  try {
+    // Verify token in Firestore
+    const tokenSnapshot = await db.collection('passwordResetTokens')
+      .where('email', '==', email)
+      .where('resetToken', '==', token)
+      .where('used', '==', false)
+      .get();
+
+    if (tokenSnapshot.empty) {
+      return res.status(400).json({ error: 'Invalid or used token' });
+    }
+
+    const tokenDoc = tokenSnapshot.docs[0];
+    const tokenData = tokenDoc.data();
+
+    if (tokenData.expiry < Date.now()) {
+      return res.status(400).json({ error: 'Token has expired' });
+    }
+
+    // Find user
+    const userSnapshot = await db.collection('users').where('email', '==', email).get();
+    if (userSnapshot.empty) {
+      return res.status(400).json({ error: 'No user found with this email' });
+    }
+
+    const userDoc = userSnapshot.docs[0];
+
+    await userDoc.ref.update({
+      password: newPassword,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // Mark token as used
+    await tokenDoc.ref.update({
+      used: true,
+      usedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.status(200).json({ message: 'Password reset successfully' });
+  } catch (error) {
+    console.error('Error in reset-password:', error);
+    res.status(500).json({ error: `Failed to reset password: ${error.message}` });
+  }
+});
+
 module.exports = router;

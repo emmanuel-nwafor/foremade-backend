@@ -999,7 +999,7 @@ async function sendSellerOrderNotification({ email, orderId, items, total, curre
       <p>Order Total: ${currencySymbol}${total.toFixed(2)}</p>
     </div>
     <p>Coordinate delivery via the logistics dashboard:</p>
-    <a href="https://foremade.com/logistics/dashboard" class="button">Go to Logistics Dashboard</a>
+    <a href="https://foremade.com/dashboard" class="button">Go to Logistics Dashboard</a>
   </div>
   <div class="footer">
     <p>FOREMADE Marketplace © 2025 &nbsp;•&nbsp; <a href="https://foremade.com/terms-conditions">Terms</a> &nbsp;•&nbsp; <a href="https://foremade.com/privacy-policy">Privacy</a></p>
@@ -1082,6 +1082,73 @@ async function sendInactiveUserReminder({ email, name }) {
   await transporter.sendMail(mailOptions);
 }
 
+// Function to send password reset email
+async function sendPasswordResetEmail({ email, resetToken }) {
+  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+    throw new Error('Valid email is required');
+  }
+  if (!resetToken) {
+    throw new Error('Reset token is required');
+  }
+
+  const resetLink = `https://foremade.vercel.app/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
+  const mailOptions = {
+    from: `"FOREMADE Support" <${process.env.SUPPORT_EMAIL || process.env.EMAIL_USER || 'support@foremade.com'}>`,
+    to: email,
+    subject: 'Password Reset Request - FOREMADE',
+    html: `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Password Reset</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #ffffff; color: #0F2940; }
+    .header { background-color: #0F2940; text-align: center; padding: 40px 20px; }
+    .header img { max-width: 180px; margin-bottom: 10px; }
+    .header h2 { color: #ffffff; font-size: 22px; margin-top: 10px; }
+    .content { max-width: 600px; margin: 0 auto; padding: 40px 25px; background-color: #ffffff; text-align: center; }
+    .content h1 { color: #D9782D; font-size: 24px; margin-bottom: 20px; }
+    .content p { font-size: 16px; line-height: 1.6; margin-bottom: 25px; }
+    .button { display: inline-block; background-color: #0F2940; color: #ffffff; padding: 14px 28px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 15px; margin-top: 10px; }
+    .footer { background-color: #F4F4F4; padding: 30px 20px; text-align: center; font-size: 13px; color: #666666; }
+    .footer a { color: #0F2940; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="https://foremade.com/assets/logi-DGW4y32z.png" alt="FOREMADE Logo" />
+    <h2>Password Reset</h2>
+  </div>
+  <div class="content">
+    <h1>Reset Your Password</h1>
+    <p>Hi there,</p>
+    <p>We received a request to reset your FOREMADE account password. Click the button below to set a new password:</p>
+    <a href="${resetLink}" class="button">Reset Password</a>
+    <p>This link will expire in 1 hour for security reasons. If you didn’t request a password reset, please ignore this email or contact us at <a href="mailto:support@foremade.com">support@foremade.com</a>.</p>
+    <p style="margin-top: 40px;">Thank you!</p>
+    <p><strong>The FOREMADE Team</strong></p>
+  </div>
+  <div class="footer">
+    <p>Questions? Contact us at <a href="mailto:support@foremade.com">support@foremade.com</a><br />
+    You received this email because a password reset was requested for your account at <a href="https://foremade.com">foremade.com</a>.</p>
+    <p>© 2025 FOREMADE. All rights reserved.</p>
+  </div>
+</body>
+</html>`
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Password reset email sent to ${email}`);
+  } catch (error) {
+    console.error(`Failed to send password reset email to ${email}:`, error);
+    throw new Error(`Failed to send password reset email: ${error.message}`);
+  }
+}
+
+
 module.exports = {
   sendDispatchEmail,
   sendShippingConfirmationEmail,
@@ -1099,6 +1166,7 @@ module.exports = {
   sendOTPEmail,
   sendEmailVerification,
   sendSellerOrderNotification,
+  sendPasswordResetEmail,
   sendInactiveUserReminder,
   // sendProSellerRequestReceived, // Removed as it is not defined
   sendProductBumpReceipt,
