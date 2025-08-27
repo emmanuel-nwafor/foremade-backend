@@ -1847,8 +1847,8 @@ router.post('/api/verify-business-reg', async (req, res) => {
         partner_id: smilePartnerId,
         api_key: smileApiKey,
         country: countryCode,
-        business_type: countryCode === 'NG' ? 'limited_liability' : 'company', // Adjust based on country
-        registration_number: regNumber,
+        business_type: countryCode === 'NG' ? 'limited_liability' : 'company',
+        id_number: regNumber,
       },
       {
         headers: { 'Content-Type': 'application/json' },
@@ -1878,8 +1878,11 @@ router.post('/api/verify-business-reg', async (req, res) => {
       status: error.response?.status,
       stack: error.stack,
     });
-    const errorMessage = error.response?.data?.message || 'Business registration number not valid';
-    return res.status(400).json({ error: errorMessage, details: { taxError: taxRef ? 'Tax reference not verified' : '' } });
+    const errorMessage = error.response?.data?.error || 'Business registration number not valid';
+    return res.status(400).json({
+      error: errorMessage,
+      details: { taxError: typeof taxRef !== 'undefined' ? 'Tax reference not verified' : '' }
+    });
   }
 });
 
