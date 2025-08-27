@@ -1517,6 +1517,9 @@ router.post('/request-password-reset', async (req, res) => {
     const userId = userDoc.id;
 
     // Generate a reset token
+    if (!crypto.randomBytes) {
+      throw new Error('crypto.randomBytes is not available');
+    }
     const resetToken = crypto.randomBytes(32).toString('hex');
     const tokenExpiry = Date.now() + 3600000; // 1 hour expiry
 
@@ -1529,9 +1532,10 @@ router.post('/request-password-reset', async (req, res) => {
       used: false,
       createdAt: serverTimestamp(),
     });
+    console.log('Password reset token stored:', { email, resetToken, expiry: tokenExpiry });
 
     // Send reset email
-    await sendPasswordResetEmail({ email, resetToken });
+    await emailService.sendPasswordResetEmail({ email, resetToken });
     console.log('Password reset email sent successfully for email:', email);
     res.json({ success: true, message: 'Password reset link sent to your email.' });
   } catch (error) {
