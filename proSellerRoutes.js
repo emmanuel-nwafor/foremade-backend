@@ -1847,6 +1847,10 @@ router.post('/api/verify-business-reg', async (req, res) => {
     // Set id_type based on country
     const idType = countryCode === 'NG' ? 'CAC_REGISTRATION' : 'COMPANIES_HOUSE';
 
+    // Generate unique job_id and timestamp for partner_params
+    const jobId = `JOB_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const timestamp = new Date().toISOString();
+
     // Prepare payload for Smile Identity
     const payload = {
       partner_id: smilePartnerId,
@@ -1855,10 +1859,14 @@ router.post('/api/verify-business-reg', async (req, res) => {
       business_type: countryCode === 'NG' ? 'limited_liability' : 'company',
       id_type: idType,
       id_number: cleanedRegNumber,
+      partner_params: {
+        job_id: jobId,
+        timestamp: timestamp,
+      },
     };
 
     // Log the exact payload being sent
-    console.log('Smile Identity payload:', JSON.stringify(payload));
+    console.log('Smile Identity payload:', JSON.stringify(payload, null, 2));
 
     // Verify registration number with Smile Identity
     console.log(`Verifying regNumber: ${cleanedRegNumber} for country: ${countryCode} with id_type: ${idType}`);
@@ -1871,7 +1879,7 @@ router.post('/api/verify-business-reg', async (req, res) => {
       }
     );
 
-    console.log('Smile Identity response:', regResponse.data);
+    console.log('Smile Identity response:', JSON.stringify(regResponse.data, null, 2));
     const regValid = regResponse.data.success && regResponse.data.result?.verified || false;
 
     // Tax reference is optional and not verified with Smile Identity
