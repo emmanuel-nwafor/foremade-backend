@@ -1813,6 +1813,8 @@ router.post('/api/admin/approve-pro-seller', async (req, res) => { // Removed au
  *               $ref: '#/components/schemas/Error'
  */
 router.post('/api/verify-business-reg', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json'); // Force JSON content type
+
   try {
     const { regNumber, taxRef, country } = req.body;
     if (!regNumber || !country) {
@@ -1834,22 +1836,35 @@ router.post('/api/verify-business-reg', async (req, res) => {
     // Normalize country code
     const countryCode = country === 'United Kingdom' || country === 'UK' || country === 'GB' ? 'GB' : 'NG';
 
-    // Validate regNumber format (7-8 digits for Nigeria, adjust for UK if needed)
-    if (!/^\d{7,8}$/.test(regNumber) && countryCode === 'NG') {
-      return res.status(400).json({ error: 'Business registration number must be 7-8 digits for Nigeria' });
+    // Strip prefixes and non-digits from regNumber (e.g., "RC 1700634" becomes "1700634")
+    const cleanedRegNumber = regNumber.replace(/[^0-9]/g, '');
+
+    // Validate cleaned regNumber format (7-8 digits for Nigeria, adjust for UK if needed)
+    if (!/^\d{7,8}$/.test(cleanedRegNumber) && countryCode === 'NG') {
+      return res.status(400).json({ error: 'Business registration number must be 7-8 digits for Nigeria (without prefixes like RC)' });
     }
 
+    // Set id_type based on country
+    const idType = countryCode === 'NG' ? 'CAC_REGISTRATION' : 'COMPANIES_HOUSE';
+
+    // Prepare payload for Smile Identity
+    const payload = {
+      partner_id: smilePartnerId,
+      api_key: smileApiKey,
+      country: countryCode,
+      business_type: countryCode === 'NG' ? 'limited_liability' : 'company',
+      id_type: idType,
+      id_number: cleanedRegNumber,
+    };
+
+    // Log the exact payload being sent
+    console.log('Smile Identity payload:', JSON.stringify(payload));
+
     // Verify registration number with Smile Identity
-    console.log(`Verifying regNumber: ${regNumber} for country: ${countryCode}`);
+    console.log(`Verifying regNumber: ${cleanedRegNumber} for country: ${countryCode} with id_type: ${idType}`);
     const regResponse = await axios.post(
       baseUrl,
-      {
-        partner_id: smilePartnerId,
-        api_key: smileApiKey,
-        country: countryCode,
-        business_type: countryCode === 'NG' ? 'limited_liability' : 'company',
-        id_number: regNumber,
-      },
+      payload,
       {
         headers: { 'Content-Type': 'application/json' },
         timeout: 10000, // 10-second timeout
