@@ -1825,7 +1825,6 @@ router.post('/api/verify-business-reg', async (req, res) => {
 
     const smileApiKey = process.env.SMILE_API_KEY;
     const smilePartnerId = process.env.SMILE_PARTNER_ID;
-    const smileSecret = process.env.SMILE_SECRET_KEY || smileApiKey; // Fallback to API key if no secret
     const smileEnv = process.env.SMILE_ENV || 'sandbox';
     if (!smileApiKey || !smilePartnerId) {
       console.error('SMILE_API_KEY or SMILE_PARTNER_ID is not set in environment variables');
@@ -1854,8 +1853,21 @@ router.post('/api/verify-business-reg', async (req, res) => {
     const jobId = `JOB_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     const timestamp = new Date().toISOString();
 
-    // Prepare payload for signature (exclude signature itself to avoid infinite loop)
-    const payloadForSignature = {
+    // Generate signature mimicking Smile ID's method
+    const signatureString = `${smilePartnerId}${smileApiKey}${timestamp}`; // Based on docs' input pattern
+    const signature = crypto
+      .createHmac('sha256', smileApiKey)
+      .update(signatureString)
+      .digest('hex');
+    console.log('Signature generation:', {
+      signatureString: signatureString,
+      apiKeyUsed: smileApiKey,
+      timestamp: timestamp,
+      signature: signature
+    });
+
+    // Prepare payload for Smile Identity
+    const payload = {
       partner_id: smilePartnerId,
       api_key: smileApiKey,
       country: countryCode,
@@ -1865,27 +1877,14 @@ router.post('/api/verify-business-reg', async (req, res) => {
       partner_params: {
         job_id: jobId,
         timestamp: timestamp,
-      },
-    };
-
-    // Generate signature using HMAC-SHA256 with the entire payload string
-    const signatureString = JSON.stringify(payloadForSignature);
-    const signature = crypto
-      .createHmac('sha256', smileSecret)
-      .update(signatureString)
-      .digest('hex');
-
-    // Prepare final payload for Smile Identity
-    const payload = {
-      ...payloadForSignature,
-      partner_params: {
-        ...payloadForSignature.partner_params,
         signature: signature,
+        job_type: 7, // Business Verification
       },
     };
 
-    // Log the exact payload being sent
+    // Log the exact payload and request body sent
     console.log('Smile Identity payload:', JSON.stringify(payload, null, 2));
+    console.log('Request body sent:', JSON.stringify(payload));
 
     // Verify registration number with Smile Identity
     console.log(`Verifying regNumber: ${cleanedRegNumber} for country: ${countryCode} with id_type: ${idType}`);
