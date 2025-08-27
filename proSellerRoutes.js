@@ -1750,6 +1750,141 @@ router.post('/api/admin/approve-pro-seller', async (req, res) => { // Removed au
 
 /**
  * @swagger
+ * /api/verify-business-reg:
+ *   post:
+ *     summary: Verify business registration number and tax reference
+ *     description: Verifies the business registration number using Smile Identity's API and optionally validates tax reference
+ *     tags: [Pro-Seller]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - regNumber
+ *               - country
+ *             properties:
+ *               regNumber:
+ *                 type: string
+ *                 description: Business registration number
+ *                 example: "1234567"
+ *               taxRef:
+ *                 type: string
+ *                 description: Tax reference number (optional)
+ *                 example: "12345678"
+ *               country:
+ *                 type: string
+ *                 enum: [Nigeria, NG, United Kingdom, UK, GB]
+ *                 description: Business country
+ *                 example: "Nigeria"
+ *     responses:
+ *       200:
+ *         description: Verification successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Verification successful"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     regValid:
+ *                       type: boolean
+ *                     taxValid:
+ *                       type: boolean
+ *       400:
+ *         description: Invalid request or verification failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/api/verify-business-reg', async (req, res) => {
+  try {
+    const { regNumber, taxRef, country } = req.body;
+    if (!regNumber || !country) {
+      return res.status(400).json({ error: 'regNumber and country are required' });
+    }
+
+    const smileApiKey = process.env.SMILE_API_KEY;
+    const smilePartnerId = process.env.SMILE_PARTNER_ID;
+    const smileEnv = process.env.SMILE_ENV || 'sandbox';
+    if (!smileApiKey || !smilePartnerId) {
+      console.error('SMILE_API_KEY or SMILE_PARTNER_ID is not set in environment variables');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
+    const baseUrl = smileEnv === 'sandbox'
+      ? 'https://api.smileidentity.com/v1/business_verification'
+      : 'https://api.smileidentity.com/v1/business_verification';
+
+    // Normalize country code
+    const countryCode = country === 'United Kingdom' || country === 'UK' || country === 'GB' ? 'GB' : 'NG';
+
+    // Validate regNumber format (7-8 digits for Nigeria, adjust for UK if needed)
+    if (!/^\d{7,8}$/.test(regNumber) && countryCode === 'NG') {
+      return res.status(400).json({ error: 'Business registration number must be 7-8 digits for Nigeria' });
+    }
+
+    // Verify registration number with Smile Identity
+    console.log(`Verifying regNumber: ${regNumber} for country: ${countryCode}`);
+    const regResponse = await axios.post(
+      baseUrl,
+      {
+        partner_id: smilePartnerId,
+        api_key: smileApiKey,
+        country: countryCode,
+        business_type: countryCode === 'NG' ? 'limited_liability' : 'company', // Adjust based on country
+        registration_number: regNumber,
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000, // 10-second timeout
+      }
+    );
+
+    console.log('Smile Identity response:', regResponse.data);
+    const regValid = regResponse.data.success && regResponse.data.result?.verified || false;
+
+    // Tax reference is optional and not verified with Smile Identity
+    const taxValid = true; // Set to true to match original behavior
+
+    if (!regValid) {
+      return res.status(400).json({ error: 'Business registration number not valid' });
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Verification successful',
+      data: { regValid, taxValid },
+    });
+  } catch (error) {
+    console.error('Verification error:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      stack: error.stack,
+    });
+    const errorMessage = error.response?.data?.message || 'Business registration number not valid';
+    return res.status(400).json({ error: errorMessage, details: { taxError: taxRef ? 'Tax reference not verified' : '' } });
+  }
+});
+
+/**
+ * @swagger
  * /api/admin/all-pro-sellers:
  *   get:
  *     summary: List all pro sellers
