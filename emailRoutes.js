@@ -2,9 +2,14 @@ const express = require('express');
 const { db } = require('./firebaseConfig');
 const { collection, doc, setDoc, getDocs, updateDoc, query, where, serverTimestamp } = require('firebase/firestore');
 const router = express.Router();
+const crypto = require('crypto');
 const emailService = require('./emailService');
 
 // Remove redundant nodemailer transporter since emailService handles it
+
+// Log initialization to debug
+console.log('emailRoutes initialized. Firestore db:', db ? 'Available' : 'Not available');
+console.log('crypto module:', crypto ? 'Available' : 'Not available');
 
 /**
  * @swagger
