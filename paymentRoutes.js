@@ -75,11 +75,6 @@ router.post('/create-payment-intent', async (req, res) => {
     if (!amount || amount <= 0 || !metadata.sellerId) {
       return res.status(400).json({ error: 'Invalid amount or missing sellerId' });
     }
-    const adminBankRef = doc(db, 'admin', 'bank');
-    const adminBankSnap = await getDoc(adminBankRef);
-    if (!adminBankSnap.exists() || adminBankSnap.data().country !== 'United Kingdom') {
-      return res.status(500).json({ error: 'Admin bank not configured for UK' });
-    }
     const totalAmountInCents = Math.round(amount);
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalAmountInCents,
