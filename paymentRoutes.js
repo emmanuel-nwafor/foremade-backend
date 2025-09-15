@@ -71,6 +71,7 @@ router.post('/create-payment-intent', async (req, res) => {
       return res.status(400).json({ error: 'Request body is missing' });
     }
     const { amount, currency = 'gbp', metadata } = req.body;
+    console.log('Received payload:', { amount, currency, metadata }); // Add for debugging
     if (!amount || amount <= 0 || !metadata.sellerId) {
       return res.status(400).json({ error: 'Invalid amount or missing sellerId' });
     }
