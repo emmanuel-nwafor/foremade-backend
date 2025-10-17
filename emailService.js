@@ -303,16 +303,18 @@ const nodemailer = require('nodemailer');
 
 // Replace Gmail config with cPanel SMTP SSL/TLS config
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST, // e.g. 'mail.yourdomain.com'
-  port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 465, // 465 for SSL/TLS, 587 for STARTTLS
-  secure: process.env.SMTP_SECURE === 'true' || (!process.env.SMTP_SECURE && (!process.env.SMTP_PORT || process.env.SMTP_PORT === '465')), // true for SSL/TLS, false for STARTTLS
+  host: process.env.SMTP_HOST, // mail.yourdomain.com
+  port: parseInt(process.env.SMTP_PORT) || 465,
+  secure: process.env.SMTP_PORT === '465', // true for SSL/TLS
   auth: {
-    user: process.env.EMAIL_USER, // your cPanel email address
-    pass: process.env.EMAIL_PASS  // your cPanel email password
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
   },
-  requireTLS: process.env.SMTP_REQUIRE_TLS === 'true', // for STARTTLS
+  pool: true,         // <--- keep the connection open
+  maxConnections: 5,  // allow up to 5 concurrent
+  maxMessages: 100,   // reuse connection before closing
   logger: true,
-  debug: true, // Enable debug output
+  debug: true
 }).on('error', (error) => {
   console.error('Email Transport Error:', error.message);
   if (error.code === 'EAUTH') {
