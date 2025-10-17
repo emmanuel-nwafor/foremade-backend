@@ -392,8 +392,8 @@ router.post('/send-seller-order-notification', async (req, res) => {
       console.log('Fallback sellerId from items:', sellerId);
     }
 
-    if (!orderId || !sellerId || !email || !items || !total) {
-      console.warn('Missing required fields:', { orderId, sellerId, email, items, total });
+    if (!orderId || !sellerId || !items || !total) {
+      console.warn('Missing required fields:', { orderId, sellerId, items, total });
       return res.status(400).json({ error: 'Missing required fields' });
     }
     if (!/\S+@\S+\.\S+/.test(email)) {
@@ -431,6 +431,17 @@ router.post('/send-seller-order-notification', async (req, res) => {
       return res.status(404).json({ error: 'Seller not found' });
     }
     const sellerData = sellerSnap.data();
+
+    // Fetch email if not provided
+    if (!email) {
+      email = sellerData.email;
+      if (!email || !/\S+@\S+\.\S+/.test(email)) {
+        console.warn(`No valid email found for seller ${sellerId}`);
+        return res.status(400).json({ error: 'No valid email for seller' });
+      }
+      console.log('Fetched email for seller:', email);
+    }
+
     if (sellerData.notificationEmailSent?.[orderId]) {
       console.log(`Seller notification already sent for order ${orderId} to ${email}`);
       return res.json({ status: 'success', message: 'Seller notification already sent' });
