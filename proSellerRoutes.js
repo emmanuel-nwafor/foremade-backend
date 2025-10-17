@@ -1152,8 +1152,6 @@ router.get('/api/pro-seller/bump-quota', async (req, res) => {
 
 module.exports = router;
 
-module.exports = router;
-
 /**
  * @swagger
  * /api/pro-seller-analytics:

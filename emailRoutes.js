@@ -1406,6 +1406,20 @@ router.post('/api/send-bump-email', async (req, res) => {
   }
 });
 
+router.post('/api/send-message-email', async (req, res) => {
+  try {
+    const { email, duration, amount, startTime, endTime } = req.body;
+    if (!email || !/\S+@\S+\.\S+/.test(email) || !duration || !amount || !startTime || !endTime) {
+      return res.status(400).json({ error: 'Valid email, duration, amount, startTime, and endTime are required' });
+    }
+    await emailService.sendProductBumpReceipt({ email, duration, amount, startTime, endTime });
+    res.json({ status: 'success', message: 'Product bump receipt email sent' });
+  } catch (error) {
+    console.error('Error sending product bump receipt email:', { message: error.message, stack: error.stack, payload: req.body });
+    res.status(500).json({ error: 'Failed to send product bump receipt email', details: error.message });
+  }
+});
+
 /**
  * @swagger
  * /send-membership-revoked-email:
