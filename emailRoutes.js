@@ -364,20 +364,22 @@ router.post('/send-product-rejected-email', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/send-order-confirmation', async (req, res) => {
+router.post('/send-seller-order-notification', async (req, res) => {
   try {
-    const { orderId, email, items, total, currency } = req.body;
-    console.log('Received payload for order confirmation:', {
+    const { orderId, sellerId, email, items, total, currency, shippingDetails } = req.body;
+    console.log('Received payload for seller order notification:', {
       orderId,
+      sellerId,
       email,
       items,
       total,
       currency,
+      shippingDetails,
       payload: JSON.stringify(req.body, null, 2),
     });
 
-    if (!orderId || !email || !items || !total) {
-      console.warn('Missing required fields:', { orderId, email, items, total });
+    if (!orderId || !sellerId || !email || !items || !total) {
+      console.warn('Missing required fields:', { orderId, sellerId, email, items, total });
       return res.status(400).json({ error: 'Missing required fields' });
     }
     if (!/\S+@\S+\.\S+/.test(email)) {
@@ -396,6 +398,10 @@ router.post('/send-order-confirmation', async (req, res) => {
       console.warn('Invalid currency:', currency);
       return res.status(400).json({ error: 'Invalid currency' });
     }
+    if (!shippingDetails || typeof shippingDetails !== 'object') {
+      console.warn('Invalid shipping details:', shippingDetails);
+      return res.status(400).json({ error: 'Shipping details are required' });
+    }
 
     for (const item of items) {
       if (!item.name || !item.quantity || !item.price || !item.imageUrls || !Array.isArray(item.imageUrls)) {
@@ -404,28 +410,44 @@ router.post('/send-order-confirmation', async (req, res) => {
       }
     }
 
-    const orderRef = doc(db, 'orders', orderId);
-    const orderSnap = await getDoc(orderRef);
-    if (!orderSnap.exists()) {
-      console.warn(`Order ${orderId} not found in Firestore`);
-      return res.status(404).json({ error: 'Order not found' });
+    const sellerRef = doc(db, 'users', sellerId);
+    const sellerSnap = await getDoc(sellerRef);
+    if (!sellerSnap.exists()) {
+      console.warn(`Seller ${sellerId} not found in Firestore`);
+      return res.status(404).json({ error: 'Seller not found' });
     }
-    const orderData = orderSnap.data();
-    if (orderData.confirmationEmailSent) {
-      console.log(`Order confirmation email already sent to ${email} for order ${orderId}`);
-      return res.json({ status: 'success', message: 'Order confirmation email already sent' });
+    const sellerData = sellerSnap.data();
+    if (sellerData.notificationEmailSent?.[orderId]) {
+      console.log(`Seller notification already sent for order ${orderId} to ${email}`);
+      return res.json({ status: 'success', message: 'Seller notification already sent' });
     }
 
-    await emailService.sendOrderConfirmationSimpleEmail({ email, orderNumber: orderId, items, total });
-    console.log(`Order confirmation email sent to ${email} for order ${orderId}`);
-    res.json({ status: 'success', message: 'Order confirmation email sent' });
+    // Assuming emailService has a method for seller notifications
+    await emailService.sendSellerOrderNotification({
+      email,
+      orderNumber: orderId,
+      items,
+      total,
+      currency,
+      shippingDetails,
+      sellerName: sellerData.name || 'Seller',
+    });
+
+    // Mark as sent
+    await updateDoc(sellerRef, {
+      [`notificationEmailSent.${orderId}`]: true,
+      updatedAt: serverTimestamp(),
+    });
+
+    console.log(`Seller order notification email sent to ${email} for order ${orderId}`);
+    res.json({ status: 'success', message: 'Seller order notification email sent' });
   } catch (error) {
-    console.error('Error sending order confirmation email:', {
+    console.error('Error sending seller order notification email:', {
       message: error.message,
       stack: error.stack,
       payload: JSON.stringify(req.body, null, 2),
     });
-    res.status(500).json({ error: 'Failed to send order confirmation email', details: error.message });
+    res.status(500).json({ error: 'Failed to send seller order notification email', details: error.message });
   }
 });
 
