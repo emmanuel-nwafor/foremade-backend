@@ -366,17 +366,31 @@ router.post('/send-product-rejected-email', async (req, res) => {
  */
 router.post('/send-seller-order-notification', async (req, res) => {
   try {
-    const { orderId, sellerId, email, items, total, currency, shippingDetails } = req.body;
-    console.log('Received payload for seller order notification:', {
-      orderId,
-      sellerId,
-      email,
-      items,
-      total,
-      currency,
-      shippingDetails,
-      payload: JSON.stringify(req.body, null, 2),
-    });
+    let { orderId, sellerId, email, items, total, currency, shippingDetails } = req.body;
+    console.log('Received payload for seller order notification:', req.body);
+
+    // Parse stringified payload if present
+    if (req.body.payload && typeof req.body.payload === 'string') {
+      try {
+        const parsedPayload = JSON.parse(req.body.payload);
+        orderId = parsedPayload.orderId || orderId;
+        sellerId = parsedPayload.sellerId || sellerId;
+        email = parsedPayload.email || email;
+        items = parsedPayload.items || items;
+        total = parsedPayload.total || total;
+        currency = parsedPayload.currency || currency;
+        shippingDetails = parsedPayload.shippingDetails || shippingDetails;
+        console.log('Parsed payload:', parsedPayload);
+      } catch (parseErr) {
+        console.warn('Failed to parse payload string:', parseErr.message);
+      }
+    }
+
+    // Fallback sellerId from items[0]
+    if (!sellerId && items?.length > 0) {
+      sellerId = items[0].sellerId;
+      console.log('Fallback sellerId from items:', sellerId);
+    }
 
     if (!orderId || !sellerId || !email || !items || !total) {
       console.warn('Missing required fields:', { orderId, sellerId, email, items, total });
@@ -422,7 +436,6 @@ router.post('/send-seller-order-notification', async (req, res) => {
       return res.json({ status: 'success', message: 'Seller notification already sent' });
     }
 
-    // Assuming emailService has a method for seller notifications
     await emailService.sendSellerOrderNotification({
       email,
       orderNumber: orderId,
@@ -433,7 +446,6 @@ router.post('/send-seller-order-notification', async (req, res) => {
       sellerName: sellerData.name || 'Seller',
     });
 
-    // Mark as sent
     await updateDoc(sellerRef, {
       [`notificationEmailSent.${orderId}`]: true,
       updatedAt: serverTimestamp(),
