@@ -3,7 +3,7 @@ name: Deploy Node.js Backend to cPanel Subdomain via FTP
 on:
   push:
     branches:
-      - backend-production  # or your backend branch name
+      - main  # or your backend branch name
 
 jobs:
   deploy:
