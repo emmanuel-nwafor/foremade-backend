@@ -1,0 +1,80 @@
+name: Deploy Node.js Backend to cPanel Subdomain via FTP
+
+on:
+  push:
+    branches:
+      - backend-production  # or your backend branch name
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: npm install --production
+        env:
+          NODE_ENV: production
+
+      - name: Prepare backend for deployment
+        run: |
+          mkdir deploy
+          cp -r package.json package-lock.json deploy/
+          cp -r src deploy/src 2>/dev/null || true
+          cp -r app.js deploy/ 2>/dev/null || true
+          cp -r server.js deploy/ 2>/dev/null || true
+          cp -r config deploy/config 2>/dev/null || true
+          cp -r routes deploy/routes 2>/dev/null || true
+          cp -r controllers deploy/controllers 2>/dev/null || true
+          cp -r middlewares deploy/middlewares 2>/dev/null || true
+          cp -r utils deploy/utils 2>/dev/null || true
+          cp -r models deploy/models 2>/dev/null || true
+          cp -r node_modules deploy/node_modules
+          echo "✅ Backend prepared for deployment"
+
+      - name: Deploy backend via FTP
+        uses: samkirkland/ftp-deploy-action@v4.3.5
+        with:
+          server: ${{ secrets.BACKEND_FTP_HOST }}
+          username: ${{ secrets.BACKEND_FTP_USER }}
+          password: ${{ secrets.BACKEND_FTP_PASS }}
+          local-dir: deploy/
+          server-dir: /public_html/api/
+
+    env:
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+      DOMAIN: ${{ secrets.DOMAIN }}
+      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      EMAIL_PASS1: ${{ secrets.EMAIL_PASS1 }}
+      EMAIL_USER: ${{ secrets.EMAIL_USER }}
+      EMAIL_USER1: ${{ secrets.EMAIL_USER1 }}
+      FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+      FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+      FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+      FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+      FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+      LOOKUPTAX_API_KEY: ${{ secrets.LOOKUPTAX_API_KEY }}
+      PAYSTACK_SECRET_KEY: ${{ secrets.PAYSTACK_SECRET_KEY }}
+      PORT: ${{ secrets.PORT }}
+      RECAPTCHA_SECRET_KEY: ${{ secrets.RECAPTCHA_SECRET_KEY }}
+      SALES_EMAIL: ${{ secrets.SALES_EMAIL }}
+      SEND_TEST_EMAILS_ON_DEPLOY: ${{ secrets.SEND_TEST_EMAILS_ON_DEPLOY }}
+      SMILE_API_KEY: ${{ secrets.SMILE_API_KEY }}
+      SMILE_ENV: ${{ secrets.SMILE_ENV }}
+      SMILE_PARTNER_ID: ${{ secrets.SMILE_PARTNER_ID }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_REQUIRE_TLS: ${{ secrets.SMTP_REQUIRE_TLS }}
+      SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
+      TEST_EMAIL_ON_DEPLOY: ${{ secrets.TEST_EMAIL_ON_DEPLOY }}
+      VITE_RECAPTCHA_SITE_KEY: ${{ secrets.VITE_RECAPTCHA_SITE_KEY }}
