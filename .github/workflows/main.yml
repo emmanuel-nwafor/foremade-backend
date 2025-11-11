@@ -41,7 +41,7 @@ jobs:
           username: ${{ secrets.BACKEND_FTP_USER }}
           password: ${{ secrets.BACKEND_FTP_PASS }}
           local-dir: ./
-          server-dir: /public_html/api.foremade.com/GitBackend/
+          server-dir: ./
 
     env:
       CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
